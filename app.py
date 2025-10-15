@@ -51,6 +51,11 @@ app.config.setdefault("GOOGLE_CLIENT_SECRET", os.getenv("GOOGLE_CLIENT_SECRET", 
 app.config.setdefault("GOOGLE_APPS_DOMAIN", os.getenv("GOOGLE_APPS_DOMAIN", "3strands.co"))
 app.config.setdefault("EXTERNAL_BASE_URL", os.getenv("EXTERNAL_BASE_URL"))
 app.config.setdefault(
+    "ALLOW_INSECURE_GOOGLE_REDIRECTS",
+    os.getenv("ALLOW_INSECURE_GOOGLE_REDIRECTS", "").lower()
+    in {"1", "true", "yes", "on"},
+)
+app.config.setdefault(
     "CALENDAR_EMBEDS",
     [
         {
@@ -84,16 +89,17 @@ def _require_google_oauth_ready() -> None:
         )
 
 
-def _external_url(endpoint: str) -> str:
-    path = url_for(endpoint, _external=False)
-    base_url = app.config.get("EXTERNAL_BASE_URL")
-    if base_url:
-        base_url = base_url.rstrip("/")
-        return f"{base_url}{path}"
+def _assert_public_https(parsed_url, context: str) -> None:
+    allow_insecure = app.config.get("ALLOW_INSECURE_GOOGLE_REDIRECTS", False)
+    if allow_insecure:
+        return
 
-    absolute_url = url_for(endpoint, _external=True)
-    parsed = urlparse(absolute_url)
-    host = parsed.hostname
+    if parsed_url.scheme != "https":
+        raise RuntimeError(
+            f"{context} must use https. Update EXTERNAL_BASE_URL to match the public domain registered in Google Cloud or set ALLOW_INSECURE_GOOGLE_REDIRECTS=1 only for local testing."
+        )
+
+    host = parsed_url.hostname
     if host:
         try:
             ip = ipaddress.ip_address(host)
@@ -101,12 +107,26 @@ def _external_url(endpoint: str) -> str:
             ip = None
         if ip and (ip.is_private or ip.is_loopback or ip.is_link_local):
             raise RuntimeError(
-                "Google OAuth cannot redirect to private or loopback addresses. Set EXTERNAL_BASE_URL to your public dashboard URL registered in Google Cloud."
+                f"{context} cannot point to a private or loopback address. Configure EXTERNAL_BASE_URL with your public HTTPS dashboard domain authorized in Google Cloud."
             )
-    if parsed.scheme != "https":
-        raise RuntimeError(
-            "Google OAuth requires an HTTPS EXTERNAL_BASE_URL that matches an authorized redirect URI in Google Cloud."
-        )
+
+
+def _external_url(endpoint: str) -> str:
+    path = url_for(endpoint, _external=False)
+    base_url = app.config.get("EXTERNAL_BASE_URL")
+    if base_url:
+        parsed_base = urlparse(base_url)
+        if not parsed_base.scheme or not parsed_base.netloc:
+            raise RuntimeError(
+                "EXTERNAL_BASE_URL must include scheme and host, e.g. https://dashboard.example.com"
+            )
+        _assert_public_https(parsed_base, "EXTERNAL_BASE_URL")
+        base_url = base_url.rstrip("/")
+        return f"{base_url}{path}"
+
+    absolute_url = url_for(endpoint, _external=True)
+    parsed = urlparse(absolute_url)
+    _assert_public_https(parsed, "Generated redirect URL")
     return absolute_url
 
 
