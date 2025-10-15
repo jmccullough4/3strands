@@ -35,15 +35,27 @@ app.config.update(
 )
 
 
+TASK_STATUSES = (
+    ("todo", "To Do"),
+    ("in_progress", "In Progress"),
+    ("done", "Completed"),
+)
+TASK_STATUS_LABELS = {key: label for key, label in TASK_STATUSES}
+
+
 def init_db():
     with sqlite3.connect(DATABASE) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                is_admin INTEGER NOT NULL DEFAULT 0
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                full_name TEXT,
+                email TEXT,
+                phone TEXT
             )
             """
         )
@@ -59,6 +71,33 @@ def init_db():
             )
             """
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'todo',
+                position INTEGER NOT NULL DEFAULT 0,
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.commit()
+
+        existing_user_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "full_name" not in existing_user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+        if "email" not in existing_user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        if "phone" not in existing_user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         conn.commit()
 
         # Ensure an admin account exists
@@ -74,6 +113,7 @@ def init_db():
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -131,7 +171,18 @@ def dashboard():
             LIMIT 5
             """
         ).fetchall()
-    return render_template("dashboard/index.html", recent_files=recent_files)
+        task_counts_query = conn.execute(
+            "SELECT status, COUNT(*) AS total FROM tasks GROUP BY status"
+        ).fetchall()
+    task_counts = {key: 0 for key, _ in TASK_STATUSES}
+    for row in task_counts_query:
+        task_counts[row["status"]] = row["total"]
+    return render_template(
+        "dashboard/index.html",
+        recent_files=recent_files,
+        task_counts=task_counts,
+        task_status_labels=TASK_STATUS_LABELS,
+    )
 
 
 @app.route("/files")
@@ -264,19 +315,56 @@ def manage_users():
                     flash("User could not be found.", "danger")
             return redirect(url_for("manage_users"))
 
+        if action == "update_profile":
+            target_id = request.form.get("user_id", "").strip()
+            if not target_id.isdigit():
+                flash("Unable to identify which user to update.", "danger")
+                return redirect(url_for("manage_users"))
+
+            full_name = request.form.get("full_name", "").strip() or None
+            email = request.form.get("email", "").strip() or None
+            phone = request.form.get("phone", "").strip() or None
+            is_admin = 1 if request.form.get("is_admin") == "on" else 0
+
+            with get_db_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE users
+                    SET full_name = ?, email = ?, phone = ?, is_admin = ?
+                    WHERE id = ?
+                    """,
+                    (full_name, email, phone, is_admin, int(target_id)),
+                )
+                conn.commit()
+
+            if cursor.rowcount:
+                flash("User details updated.", "success")
+            else:
+                flash("User could not be found.", "danger")
+            return redirect(url_for("manage_users"))
+
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        full_name = request.form.get("full_name", "").strip() or None
+        email = request.form.get("email", "").strip() or None
+        phone = request.form.get("phone", "").strip() or None
         if not username or not password:
             flash("Username and password are required.", "warning")
         else:
             try:
                 with get_db_connection() as conn:
                     conn.execute(
-                        "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
+                        """
+                        INSERT INTO users (username, password_hash, is_admin, full_name, email, phone)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
                         (
                             username,
                             generate_password_hash(password),
                             1 if request.form.get("is_admin") == "on" else 0,
+                            full_name,
+                            email,
+                            phone,
                         ),
                     )
                     conn.commit()
@@ -286,7 +374,11 @@ def manage_users():
         return redirect(url_for("manage_users"))
     with get_db_connection() as conn:
         users = conn.execute(
-            "SELECT id, username, is_admin FROM users ORDER BY username"
+            """
+            SELECT id, username, is_admin, full_name, email, phone
+            FROM users
+            ORDER BY COALESCE(NULLIF(full_name, ''), username)
+            """
         ).fetchall()
     return render_template("admin/manage_users.html", users=users)
 
@@ -347,13 +439,18 @@ def login():
         password = request.form.get("password", "")
         with get_db_connection() as conn:
             user = conn.execute(
-                "SELECT id, username, password_hash, is_admin FROM users WHERE username = ?",
+                """
+                SELECT id, username, password_hash, is_admin
+                FROM users
+                WHERE username = ?
+                """,
                 (username,),
             ).fetchone()
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["is_admin"] = bool(user["is_admin"])
+            session["user_initial"] = user["username"][:1].upper()
             flash("Welcome back!", "success")
             return redirect(url_for("dashboard"))
         flash("Invalid username or password.", "danger")
@@ -366,6 +463,135 @@ def logout():
     session.clear()
     flash("You have been signed out.", "info")
     return redirect(url_for("login"))
+
+
+def _valid_status(status: str) -> bool:
+    return status in TASK_STATUS_LABELS
+
+
+@app.route("/tasks")
+@login_required
+def tasks_board():
+    tasks_by_status = {key: [] for key, _ in TASK_STATUSES}
+    with get_db_connection() as conn:
+        tasks = conn.execute(
+            """
+            SELECT tasks.id, tasks.title, tasks.description, tasks.status,
+                   tasks.created_at, tasks.position, users.username AS creator
+            FROM tasks
+            LEFT JOIN users ON tasks.created_by = users.id
+            ORDER BY tasks.status, tasks.position, tasks.created_at
+            """
+        ).fetchall()
+    for task in tasks:
+        tasks_by_status.setdefault(task["status"], []).append(task)
+    return render_template(
+        "dashboard/tasks.html",
+        tasks_by_status=tasks_by_status,
+        task_statuses=TASK_STATUSES,
+        status_labels=TASK_STATUS_LABELS,
+    )
+
+
+@app.route("/tasks/new", methods=["POST"])
+@login_required
+def create_task():
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+    status = request.form.get("status", "todo").strip()
+
+    if not title:
+        flash("Task title is required.", "warning")
+        return redirect(url_for("tasks_board"))
+    if not _valid_status(status):
+        status = "todo"
+
+    with get_db_connection() as conn:
+        current_position = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE status = ?",
+            (status,),
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO tasks (title, description, status, position, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                title,
+                description or None,
+                status,
+                current_position + 1,
+                session.get("user_id"),
+            ),
+        )
+        conn.commit()
+
+    flash("Task added to the board.", "success")
+    return redirect(url_for("tasks_board"))
+
+
+@app.route("/tasks/<int:task_id>/move", methods=["POST"])
+@login_required
+def move_task(task_id: int):
+    new_status = request.form.get("status", "").strip()
+    if not _valid_status(new_status):
+        flash("That list is not available.", "danger")
+        return redirect(url_for("tasks_board"))
+
+    with get_db_connection() as conn:
+        max_position = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE status = ?",
+            (new_status,),
+        ).fetchone()[0]
+        cursor = conn.execute(
+            "UPDATE tasks SET status = ?, position = ? WHERE id = ?",
+            (new_status, max_position + 1, task_id),
+        )
+        conn.commit()
+
+    if cursor.rowcount:
+        flash("Task updated.", "success")
+    else:
+        flash("Task could not be found.", "danger")
+    return redirect(url_for("tasks_board"))
+
+
+@app.route("/tasks/<int:task_id>/update", methods=["POST"])
+@login_required
+def update_task(task_id: int):
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+
+    if not title:
+        flash("Task title cannot be empty.", "warning")
+        return redirect(url_for("tasks_board"))
+
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE tasks SET title = ?, description = ? WHERE id = ?",
+            (title, description or None, task_id),
+        )
+        conn.commit()
+
+    if cursor.rowcount:
+        flash("Task details saved.", "success")
+    else:
+        flash("Task could not be found.", "danger")
+    return redirect(url_for("tasks_board"))
+
+
+@app.route("/tasks/<int:task_id>/delete", methods=["POST"])
+@login_required
+def delete_task(task_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        conn.commit()
+
+    if cursor.rowcount:
+        flash("Task removed from the board.", "info")
+    else:
+        flash("Task could not be found.", "danger")
+    return redirect(url_for("tasks_board"))
 
 
 if __name__ == "__main__":
