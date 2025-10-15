@@ -46,6 +46,7 @@ GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
 
 app.config.setdefault("GOOGLE_CLIENT_ID", os.getenv("GOOGLE_CLIENT_ID", ""))
 app.config.setdefault("GOOGLE_CLIENT_SECRET", os.getenv("GOOGLE_CLIENT_SECRET", ""))
+app.config.setdefault("GOOGLE_APPS_DOMAIN", os.getenv("GOOGLE_APPS_DOMAIN", "3strands.co"))
 app.config.setdefault(
     "CALENDAR_EMBEDS",
     [
@@ -630,11 +631,15 @@ def auth_google():
     except RuntimeError as exc:
         flash(str(exc), "danger")
         return redirect(url_for("login"))
-    authorization_url, state = flow.authorization_url(
-        prompt="select_account",
-        include_granted_scopes="true",
-        access_type="offline",
-    )
+    extra_params = {
+        "prompt": "select_account",
+        "include_granted_scopes": "true",
+        "access_type": "offline",
+    }
+    hd_param = (app.config.get("GOOGLE_APPS_DOMAIN") or "").strip()
+    if hd_param:
+        extra_params["hd"] = hd_param
+    authorization_url, state = flow.authorization_url(**extra_params)
     session["google_oauth_state"] = state
     session["google_code_verifier"] = flow.code_verifier
     return redirect(authorization_url)
@@ -683,6 +688,14 @@ def auth_google_callback():
     email = _normalize_email(profile.get("email", ""))
     if not email or not profile.get("email_verified", profile.get("verified_email")):
         flash("Your Google account must have a verified email address.", "danger")
+        return redirect(url_for("login"))
+
+    domain = (app.config.get("GOOGLE_APPS_DOMAIN") or "").strip().lower()
+    if domain and not email.endswith(f"@{domain}"):
+        flash(
+            "Please sign in with your 3 Strands corporate Google Workspace account.",
+            "danger",
+        )
         return redirect(url_for("login"))
 
     with get_db_connection() as conn:
