@@ -1,0 +1,101 @@
+body {
+  background: radial-gradient(circle at top left, #1b2a38, #0d141b);
+  color: #e6edf3;
+  min-height: 100vh;
+}
+
+.navbar {
+  min-height: 72px;
+}
+
+.navbar-title {
+  color: #f5d97d;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  letter-spacing: 0.12rem;
+}
+
+.letter-spacing-1 {
+  letter-spacing: 0.12rem;
+}
+
+.navbar-logo {
+  display: flex;
+  align-items: center;
+}
+
+.navbar-logo img {
+  height: 56px;
+  width: auto;
+}
+
+.navbar-nav .nav-link {
+  color: #f5d97d;
+}
+
+.navbar-nav .nav-link:hover,
+.navbar-nav .nav-link:focus {
+  color: #fff1b5;
+}
+
+.navbar-toggler {
+  border-color: rgba(245, 217, 125, 0.6);
+}
+
+.navbar-toggler-icon {
+  filter: invert(92%);
+}
+
+.card {
+  background-color: rgba(12, 20, 28, 0.9);
+  border: 1px solid rgba(255, 215, 0, 0.15);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.brand-accent {
+  color: #d4af37;
+}
+
+.btn-brand {
+  background: linear-gradient(135deg, #d4af37, #f5d97d);
+  color: #0f212d;
+  border: none;
+  font-weight: 600;
+}
+
+.btn-brand:hover {
+  background: linear-gradient(135deg, #f5d97d, #d4af37);
+  color: #0b1620;
+}
+
+.table thead {
+  border-bottom: 2px solid rgba(212, 175, 55, 0.4);
+}
+
+.table-hover tbody tr:hover {
+  background-color: rgba(212, 175, 55, 0.08);
+}
+
+a {
+  color: #f5d97d;
+}
+
+a:hover {
+  color: #fff1b5;
+}
+
+@media (max-width: 991.98px) {
+  .navbar-title {
+    position: static;
+    transform: none;
+    margin: 0 auto;
+    padding: 0.5rem 0;
+    text-align: center;
+  }
+
+  .navbar-logo {
+    margin-left: auto;
+  }
+}
