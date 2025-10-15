@@ -1,0 +1,72 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+  <div class="row g-4 align-items-stretch">
+    <div class="col-xl-8">
+      <div class="card h-100">
+        <div class="card-body d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div>
+              <h1 class="card-title h3 mb-1 brand-accent">Ranch File Share</h1>
+              <p class="text-secondary mb-0">Download grazing plans, processing schedules, and marketing materials.</p>
+            </div>
+            <a class="btn btn-outline-straw" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+          </div>
+          <div class="table-responsive flex-grow-1">
+            <table class="table table-dark table-hover align-middle mb-0 caption-top">
+              <caption class="text-secondary">Only teammates can view or download the shared resources.</caption>
+              <thead>
+                <tr class="text-uppercase small text-secondary">
+                  <th scope="col">File name</th>
+                  <th scope="col">Uploaded by</th>
+                  <th scope="col">Uploaded on</th>
+                  <th scope="col" class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if files %}
+                  {% for file in files %}
+                    <tr>
+                      <td class="fw-semibold">{{ file['original_name'] }}</td>
+                      <td>{{ file['username'] }}</td>
+                      <td>{{ file['uploaded_at'] | default('') }}</td>
+                      <td class="text-end">
+                        <a class="btn btn-sm btn-outline-warning me-2" href="{{ url_for('download_file', file_id=file['id']) }}">Download</a>
+                        {% if session.get('is_admin') or session.get('username') == file['username'] %}
+                          <form class="d-inline" action="{{ url_for('delete_file', file_id=file['id']) }}" method="post" onsubmit="return confirm('Delete this file?');">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                          </form>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="4" class="text-center text-secondary py-4">No files have been shared yet. Upload the first document to get started.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="card-title h4 mb-3 brand-accent">Share a File</h2>
+          <p class="text-secondary">Upload butcher cut sheets, delivery schedules, recipes, or any ranch-ready resource for the team.</p>
+          <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" class="d-grid gap-3">
+            <div>
+              <label for="file" class="form-label">Choose file</label>
+              <input class="form-control" type="file" id="file" name="file" required>
+            </div>
+            <button class="btn btn-brand" type="submit">Upload to Shared Drive</button>
+          </form>
+          <div class="mt-3 small text-secondary">
+            <strong>Note:</strong> Maximum upload size is 20&nbsp;MB. Files can be removed by their uploader or an administrator.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

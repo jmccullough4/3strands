@@ -1,0 +1,174 @@
+body {
+  background: radial-gradient(circle at top left, rgba(64, 47, 26, 0.8), #080d11),
+    url("https://images.unsplash.com/photo-1500595046743-cd271d694d30?auto=format&fit=crop&w=1920&q=80") center/cover fixed;
+  color: #e6edf3;
+  min-height: 100vh;
+}
+
+.navbar {
+  min-height: 72px;
+  background: linear-gradient(135deg, rgba(20, 28, 34, 0.95), rgba(35, 52, 43, 0.9));
+}
+
+.navbar-title {
+  color: #f5d97d;
+  letter-spacing: 0.18rem;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.letter-spacing-1 {
+  letter-spacing: 0.12rem;
+}
+
+
+.navbar .container-fluid {
+  padding-right: 5.5rem;
+}
+
+.navbar-logo {
+  display: flex;
+  align-items: center;
+  padding-right: 0.75rem;
+}
+
+.navbar-logo img {
+  height: 56px;
+  width: auto;
+}
+
+.navbar-nav .nav-link {
+  color: #f5d97d;
+  font-weight: 600;
+  letter-spacing: 0.08rem;
+}
+
+.navbar-nav .nav-link:hover,
+.navbar-nav .nav-link:focus {
+  color: #fff1b5;
+}
+
+.navbar-collapse {
+  background: rgba(12, 20, 28, 0.98);
+  border-radius: 0.75rem;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.55);
+  margin-left: 0.5rem;
+}
+
+.navbar-collapse .navbar-nav {
+  text-transform: uppercase;
+}
+
+@media (min-width: 992px) {
+  .navbar-collapse {
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    border-radius: 0;
+    margin-left: 1.5rem;
+  }
+}
+
+.navbar-toggler {
+  border-color: rgba(245, 217, 125, 0.6);
+}
+
+.navbar-toggler-icon {
+  filter: invert(92%);
+}
+
+.card {
+  background-color: rgba(12, 20, 28, 0.9);
+  border: 1px solid rgba(255, 215, 0, 0.2);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45);
+}
+
+.card-farm {
+  background: linear-gradient(135deg, rgba(30, 43, 35, 0.95), rgba(22, 31, 44, 0.92));
+  border: 1px solid rgba(152, 202, 121, 0.4);
+}
+
+.brand-accent {
+  color: #d4af37;
+}
+
+.brand-emerald {
+  color: #98ca79;
+}
+
+.btn-brand {
+  background: linear-gradient(135deg, #d4af37, #f5d97d);
+  color: #0f212d;
+  border: none;
+  font-weight: 600;
+}
+
+.btn-brand:hover {
+  background: linear-gradient(135deg, #f5d97d, #d4af37);
+  color: #0b1620;
+}
+
+.btn-outline-straw {
+  border-color: rgba(245, 217, 125, 0.6);
+  color: #f5d97d;
+}
+
+.btn-outline-straw:hover {
+  background-color: rgba(245, 217, 125, 0.15);
+  color: #fff1b5;
+}
+
+.table thead {
+  border-bottom: 2px solid rgba(212, 175, 55, 0.4);
+}
+
+.table-hover tbody tr:hover {
+  background-color: rgba(212, 175, 55, 0.08);
+}
+
+a {
+  color: #f5d97d;
+}
+
+a:hover {
+  color: #fff1b5;
+}
+
+.cooler-placeholder {
+  background: linear-gradient(135deg, rgba(16, 24, 31, 0.92), rgba(19, 33, 44, 0.9));
+  border: 1px solid rgba(120, 190, 255, 0.25);
+}
+
+.cooler-placeholder .temp-pill {
+  background: rgba(120, 190, 255, 0.15);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  color: #b8e3ff;
+  font-weight: 600;
+}
+
+@media (max-width: 991.98px) {
+  .navbar-title {
+    position: static;
+    transform: none;
+    text-align: center;
+    display: block;
+    margin: 0.5rem auto 0;
+  }
+
+  .navbar .container-fluid {
+    padding-right: 1rem;
+  }
+
+  .navbar-logo {
+    position: static;
+    transform: none;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+
+  .navbar-collapse {
+    margin-left: 0;
+    margin-top: 0.75rem;
+  }
+}
