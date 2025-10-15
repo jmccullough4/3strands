@@ -1,0 +1,52 @@
+body {
+  background: radial-gradient(circle at top left, #1b2a38, #0d141b);
+  color: #e6edf3;
+  min-height: 100vh;
+}
+
+.navbar-brand img {
+  height: 48px;
+  width: auto;
+}
+
+.card {
+  background-color: rgba(12, 20, 28, 0.9);
+  border: 1px solid rgba(255, 215, 0, 0.15);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.brand-accent {
+  color: #d4af37;
+}
+
+.btn-brand {
+  background: linear-gradient(135deg, #d4af37, #f5d97d);
+  color: #0f212d;
+  border: none;
+  font-weight: 600;
+}
+
+.btn-brand:hover {
+  background: linear-gradient(135deg, #f5d97d, #d4af37);
+  color: #0b1620;
+}
+
+.letter-spacing-1 {
+  letter-spacing: 0.12rem;
+}
+
+.table thead {
+  border-bottom: 2px solid rgba(212, 175, 55, 0.4);
+}
+
+.table-hover tbody tr:hover {
+  background-color: rgba(212, 175, 55, 0.08);
+}
+
+a {
+  color: #f5d97d;
+}
+
+a:hover {
+  color: #fff1b5;
+}
