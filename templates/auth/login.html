@@ -1,0 +1,30 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+      <div class="card shadow-lg">
+        <div class="card-body p-4">
+          <div class="text-center mb-4">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo" class="img-fluid rounded-circle mb-3" style="max-width: 100px;">
+            <h1 class="h4 brand-accent">Welcome back</h1>
+            <p class="text-secondary mb-0">Sign in to access the 3 Strands Cattle Co. dashboard.</p>
+          </div>
+          <form method="post" class="d-grid gap-3">
+            <div>
+              <label for="username" class="form-label">Username</label>
+              <input type="text" class="form-control" id="username" name="username" placeholder="Enter username" required autofocus>
+            </div>
+            <div>
+              <label for="password" class="form-label">Password</label>
+              <input type="password" class="form-control" id="password" name="password" placeholder="Enter password" required>
+            </div>
+            <button type="submit" class="btn btn-brand">Sign in</button>
+          </form>
+          <div class="mt-4 small text-secondary">
+            Having trouble? Contact an administrator to reset your credentials.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
