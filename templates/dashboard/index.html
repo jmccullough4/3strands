@@ -52,6 +52,9 @@
           <div class="d-grid gap-2">
             <a class="btn btn-brand" href="{{ url_for('file_share') }}">Jump to File Share</a>
             <a class="btn btn-outline-straw" href="{{ url_for('tasks_board') }}">Collaborate on Tasks</a>
+            {% if session.get('is_admin') %}
+              <a class="btn btn-outline-straw" href="{{ url_for('manage_users') }}">Tune Access List</a>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -65,7 +68,7 @@
               {% for file in recent_files %}
                 <li class="border border-warning-subtle rounded p-3 bg-dark bg-opacity-50">
                   <div class="fw-semibold">{{ file['original_name'] }}</div>
-                  <div class="small text-secondary">{{ file['uploaded_at'] | default('') }} · {{ file['username'] }}</div>
+                  <div class="small text-secondary">{{ file['uploaded_at'] | default('') }} · {{ file['uploader'] }}</div>
                   <a class="small" href="{{ url_for('download_file', file_id=file['id']) }}">Download</a>
                 </li>
               {% endfor %}
@@ -81,14 +84,45 @@
         <div class="card-body d-flex flex-column gap-3">
           <h2 class="card-title h4 mb-2 brand-accent">Task Board Snapshot</h2>
           <p class="text-secondary mb-0">Where ranch hands track herd health, deliveries, and on-farm prep together.</p>
-          <ul class="text-secondary small mb-0 ps-3">
-            {% for key, label in task_status_labels.items() %}
-              <li><span class="fw-semibold text-light">{{ task_counts.get(key, 0) }}</span> in {{ label }}</li>
-            {% endfor %}
-          </ul>
+          {% if task_summary %}
+            <ul class="text-secondary small mb-0 ps-3">
+              {% for column in task_summary %}
+                <li><span class="fw-semibold text-light">{{ column.count }}</span> cards in {{ column.name }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-secondary small mb-0">Create your first list to start planning the next processing day.</p>
+          {% endif %}
           <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Open Shared Task Board</a>
         </div>
       </div>
     </div>
   </div>
+
+  {% if calendar_embeds %}
+    <div class="card bg-dark border border-warning-subtle mt-4">
+      <div class="card-body">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-2">
+          <div>
+            <h2 class="card-title h4 mb-1 brand-accent">Shared Ranch Calendars</h2>
+            <p class="text-secondary mb-0">Sync harvest, market runs, and ministry events straight from Google Workspace.</p>
+          </div>
+          <div class="text-secondary small">Update the embed URLs via <code>CALENDAR_EMBEDS</code> in <code>app.py</code>.</div>
+        </div>
+        <div class="calendar-grid">
+          {% for calendar in calendar_embeds %}
+            <div class="calendar-frame">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h3 class="h6 mb-0 text-uppercase letter-spacing-1">{{ calendar.title }}</h3>
+                <span class="badge rounded-pill text-bg-warning text-dark">Live</span>
+              </div>
+              <div class="ratio ratio-4x3 rounded overflow-hidden border border-warning-subtle">
+                <iframe src="{{ calendar.url }}" style="border:0" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
 {% endblock %}

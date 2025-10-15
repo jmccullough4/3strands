@@ -18,10 +18,10 @@
               <textarea class="form-control" id="description" name="description" rows="3" placeholder="Include cut sheet deadlines, processor contacts, or market notes."></textarea>
             </div>
             <div>
-              <label for="status" class="form-label">Start in list</label>
-              <select class="form-select" id="status" name="status">
-                {% for key, label in task_statuses %}
-                  <option value="{{ key }}">{{ label }}</option>
+              <label for="list_id" class="form-label">Start in list</label>
+              <select class="form-select" id="list_id" name="list_id">
+                {% for task_list in task_lists %}
+                  <option value="{{ task_list['id'] }}">{{ task_list['name'] }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -30,6 +30,13 @@
           <div class="small text-secondary">
             Tip: Everyone can move tasks between lists as work progresses. Use the details field to track delivery stops, feed schedules, or cooler maintenance notes.
           </div>
+          <form method="post" action="{{ url_for('create_task_list') }}" class="d-grid gap-2 mt-4">
+            <div>
+              <label for="list-name" class="form-label">Add a new list</label>
+              <input type="text" class="form-control" id="list-name" name="name" placeholder="Add 'Butcher Prep' or 'Farmers Market'" required>
+            </div>
+            <button type="submit" class="btn btn-outline-straw">Create List</button>
+          </form>
         </div>
       </div>
     </div>
@@ -53,15 +60,30 @@
   </div>
 
   <div class="row g-4 task-board-row">
-    {% for status_key, status_label in task_statuses %}
+    {% for task_list in task_lists %}
       <div class="col-lg-4">
         <div class="task-column h-100">
           <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2 class="h5 mb-0 text-uppercase letter-spacing-1">{{ status_label }}</h2>
-            <span class="badge rounded-pill text-bg-warning text-dark">{{ tasks_by_status.get(status_key, [])|length }}</span>
+            <h2 class="h5 mb-0 text-uppercase letter-spacing-1">{{ task_list['name'] }}</h2>
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge rounded-pill text-bg-warning text-dark">{{ tasks_by_list.get(task_list['id'], [])|length }}</span>
+              <button class="btn btn-sm btn-outline-straw" type="button" data-bs-toggle="collapse" data-bs-target="#list-actions-{{ task_list['id'] }}" aria-expanded="false" aria-controls="list-actions-{{ task_list['id'] }}">Manage</button>
+            </div>
+          </div>
+          <div class="collapse mb-3" id="list-actions-{{ task_list['id'] }}">
+            <form method="post" action="{{ url_for('rename_task_list', list_id=task_list['id']) }}" class="d-grid gap-2 mb-2">
+              <label class="form-label small" for="rename-{{ task_list['id'] }}">Rename list</label>
+              <div class="input-group input-group-sm">
+                <input type="text" class="form-control" id="rename-{{ task_list['id'] }}" name="name" value="{{ task_list['name'] }}" required>
+                <button class="btn btn-outline-warning" type="submit">Save</button>
+              </div>
+            </form>
+            <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('Remove this list? Tasks must be moved first.');">
+              <button class="btn btn-sm btn-outline-danger w-100" type="submit">Delete list</button>
+            </form>
           </div>
           <div class="d-grid gap-3">
-            {% set column_tasks = tasks_by_status.get(status_key, []) %}
+            {% set column_tasks = tasks_by_list.get(task_list['id'], []) %}
             {% if column_tasks %}
               {% for task in column_tasks %}
                 <div class="task-card card">
@@ -77,11 +99,11 @@
                       <span>{{ task['created_at'] }}</span>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-                      {% for option_key, option_label in task_statuses %}
-                        {% if option_key != status_key %}
+                      {% for option in task_lists %}
+                        {% if option['id'] != task_list['id'] %}
                           <form method="post" action="{{ url_for('move_task', task_id=task['id']) }}">
-                            <input type="hidden" name="status" value="{{ option_key }}">
-                            <button class="btn btn-sm btn-outline-straw" type="submit">Move to {{ option_label }}</button>
+                            <input type="hidden" name="list_id" value="{{ option['id'] }}">
+                            <button class="btn btn-sm btn-outline-straw" type="submit">Move to {{ option['name'] }}</button>
                           </form>
                         {% endif %}
                       {% endfor %}

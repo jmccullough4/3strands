@@ -1,51 +1,58 @@
 {% extends 'layouts/base.html' %}
 {% block content %}
-  <div class="row g-4">
+  <div class="row g-4 align-items-stretch">
     <div class="col-lg-5">
       <div class="card h-100">
-        <div class="card-body">
-          <h2 class="h4 brand-accent mb-3">Create a new user</h2>
-          <p class="text-secondary">Set up teammates with full contact details so everyone knows who to call when cattle, pork, or poultry logistics need attention.</p>
+        <div class="card-body d-flex flex-column gap-3">
+          <div>
+            <h1 class="h4 brand-accent mb-2">Authorize Google Accounts</h1>
+            <p class="text-secondary mb-0">Add the corporate Gmail addresses that are cleared to sign in. When a teammate uses Google, we'll match their verified email and create their profile automatically.</p>
+          </div>
           <form method="post" class="d-grid gap-3">
             <input type="hidden" name="action" value="create">
+            <div>
+              <label for="email" class="form-label">Email address</label>
+              <input type="email" class="form-control" id="email" name="email" placeholder="ranchhand@3strandscattle.com" required>
+            </div>
             <div>
               <label for="full_name" class="form-label">Full name</label>
               <input type="text" class="form-control" id="full_name" name="full_name" placeholder="e.g., Jordan Rivers">
             </div>
-            <div>
-              <label for="username" class="form-label">Username</label>
-              <input type="text" class="form-control" id="username" name="username" placeholder="Enter username" required>
-            </div>
             <div class="row g-3">
-              <div class="col-sm-6">
-                <label for="email" class="form-label">Email</label>
-                <input type="email" class="form-control" id="email" name="email" placeholder="name@3strandscattle.com">
-              </div>
               <div class="col-sm-6">
                 <label for="phone" class="form-label">Phone</label>
                 <input type="tel" class="form-control" id="phone" name="phone" placeholder="555-123-9876">
               </div>
-            </div>
-            <div>
-              <label for="password" class="form-label">Temporary password</label>
-              <input type="password" class="form-control" id="password" name="password" placeholder="Set initial password" required>
-              <div class="form-text">Share the password securely with the new teammate; they can change it after signing in.</div>
+              <div class="col-sm-6">
+                <label for="notes" class="form-label">Notes</label>
+                <input type="text" class="form-control" id="notes" name="notes" placeholder="Beef lead, delivery crew, etc.">
+              </div>
             </div>
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="is_admin" name="is_admin">
               <label class="form-check-label" for="is_admin">Grant administrator access</label>
             </div>
-            <button type="submit" class="btn btn-brand">Create user</button>
+            <button type="submit" class="btn btn-brand">Authorize address</button>
           </form>
+          <div class="small text-secondary">
+            Tip: Remove an address if someone leaves the team — they won't be able to authenticate with Google anymore.
+          </div>
         </div>
       </div>
     </div>
     <div class="col-lg-7">
       <div class="card h-100">
-        <div class="card-body">
-          <h2 class="h4 brand-accent mb-3">Current team members</h2>
-          <div class="table-responsive">
-            <table class="table table-dark table-hover align-middle">
+        <div class="card-body d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-3 flex-wrap">
+            <div>
+              <h2 class="h4 brand-accent mb-1">Authorized addresses</h2>
+              <p class="text-secondary mb-0">Everyone here can log in with Google Workspace. Toggle admin to unlock dashboard management.</p>
+            </div>
+            <a class="btn btn-outline-straw" href="https://support.google.com/a/answer/6087519" target="_blank" rel="noopener">Workspace sharing tips</a>
+          </div>
+          <div class="table-responsive flex-grow-1">
+            <table class="table table-dark table-hover align-middle mb-0 caption-top">
+              <caption class="text-secondary">We match these addresses against Google's verified email during sign-in.</caption>
               <thead>
                 <tr class="text-uppercase small text-secondary">
                   <th scope="col">Teammate</th>
@@ -55,88 +62,76 @@
                 </tr>
               </thead>
               <tbody>
-                {% for user in users %}
-                  <tr>
-                    <td class="fw-semibold">
-                      {{ user['full_name'] or 'Name pending' }}
-                      <div class="small text-secondary">@{{ user['username'] }}</div>
-                    </td>
-                    <td class="small">
-                      {% if user['email'] %}
-                        <div><a href="mailto:{{ user['email'] }}">{{ user['email'] }}</a></div>
-                      {% else %}
-                        <div class="text-secondary">No email yet</div>
-                      {% endif %}
-                      {% if user['phone'] %}
-                        <div class="text-secondary">{{ user['phone'] }}</div>
-                      {% endif %}
-                    </td>
-                    <td>
-                      {% if user['is_admin'] %}
-                        <span class="badge rounded-pill text-bg-warning text-dark">Admin</span>
-                      {% else %}
-                        <span class="badge rounded-pill text-bg-secondary">Member</span>
-                      {% endif %}
-                    </td>
-                    <td class="text-end">
-                      <div class="d-flex justify-content-end flex-wrap gap-2">
-                        <button class="btn btn-sm btn-outline-straw" type="button" data-bs-toggle="collapse" data-bs-target="#edit-user-{{ user['id'] }}" aria-expanded="false" aria-controls="edit-user-{{ user['id'] }}">Edit details</button>
-                        <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#reset-user-{{ user['id'] }}" aria-expanded="false" aria-controls="reset-user-{{ user['id'] }}">Reset password</button>
-                        <form action="{{ url_for('delete_user', user_id=user['id']) }}" method="post" class="d-inline" onsubmit="return confirm('Remove this user?');">
-                          <button type="submit" class="btn btn-sm btn-outline-danger" {% if user['id'] == session.get('user_id') %}disabled{% endif %}>Delete</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr class="collapse bg-dark-subtle" id="edit-user-{{ user['id'] }}">
-                    <td colspan="4">
-                      <form method="post" class="row gy-2 gx-3 align-items-end">
-                        <input type="hidden" name="action" value="update_profile">
-                        <input type="hidden" name="user_id" value="{{ user['id'] }}">
-                        <div class="col-md-3">
-                          <label class="form-label small" for="full-name-{{ user['id'] }}">Full name</label>
-                          <input type="text" class="form-control form-control-sm" id="full-name-{{ user['id'] }}" name="full_name" value="{{ user['full_name'] or '' }}">
+                {% if allowed %}
+                  {% for entry in allowed %}
+                    <tr>
+                      <td class="fw-semibold">
+                        {{ entry['full_name'] or 'Name pending' }}
+                        <div class="small text-secondary">{{ entry['notes'] or 'No notes yet' }}</div>
+                      </td>
+                      <td class="small">
+                        <div><a href="mailto:{{ entry['email'] }}">{{ entry['email'] }}</a></div>
+                        {% if entry['phone'] %}
+                          <div class="text-secondary">{{ entry['phone'] }}</div>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if entry['is_admin'] %}
+                          <span class="badge rounded-pill text-bg-warning text-dark">Admin</span>
+                        {% else %}
+                          <span class="badge rounded-pill text-bg-secondary">Member</span>
+                        {% endif %}
+                      </td>
+                      <td class="text-end">
+                        <div class="d-flex justify-content-end flex-wrap gap-2">
+                          <button class="btn btn-sm btn-outline-straw" type="button" data-bs-toggle="collapse" data-bs-target="#edit-entry-{{ entry['id'] }}" aria-expanded="false" aria-controls="edit-entry-{{ entry['id'] }}">Edit</button>
+                          <form method="post" action="{{ url_for('manage_users') }}" onsubmit="return confirm('Remove access for {{ entry['email'] }}?');">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="entry_id" value="{{ entry['id'] }}">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+                          </form>
                         </div>
-                        <div class="col-md-3">
-                          <label class="form-label small" for="email-{{ user['id'] }}">Email</label>
-                          <input type="email" class="form-control form-control-sm" id="email-{{ user['id'] }}" name="email" value="{{ user['email'] or '' }}">
-                        </div>
-                        <div class="col-md-3">
-                          <label class="form-label small" for="phone-{{ user['id'] }}">Phone</label>
-                          <input type="text" class="form-control form-control-sm" id="phone-{{ user['id'] }}" name="phone" value="{{ user['phone'] or '' }}">
-                        </div>
-                        <div class="col-md-2">
-                          <div class="form-check form-switch mt-4 pt-1">
-                            <input class="form-check-input" type="checkbox" id="is-admin-{{ user['id'] }}" name="is_admin" {% if user['is_admin'] %}checked{% endif %}>
-                            <label class="form-check-label small" for="is-admin-{{ user['id'] }}">Admin</label>
+                      </td>
+                    </tr>
+                    <tr class="collapse bg-dark-subtle" id="edit-entry-{{ entry['id'] }}">
+                      <td colspan="4">
+                        <form method="post" action="{{ url_for('manage_users') }}" class="row gy-2 gx-3 align-items-end">
+                          <input type="hidden" name="action" value="update">
+                          <input type="hidden" name="entry_id" value="{{ entry['id'] }}">
+                          <div class="col-md-4">
+                            <label class="form-label small" for="email-{{ entry['id'] }}">Email</label>
+                            <input type="email" class="form-control form-control-sm" id="email-{{ entry['id'] }}" name="email" value="{{ entry['email'] }}" required>
                           </div>
-                        </div>
-                        <div class="col-md-1 text-md-end">
-                          <button type="submit" class="btn btn-sm btn-brand w-100">Save</button>
-                        </div>
-                      </form>
-                    </td>
+                          <div class="col-md-4">
+                            <label class="form-label small" for="full-name-{{ entry['id'] }}">Full name</label>
+                            <input type="text" class="form-control form-control-sm" id="full-name-{{ entry['id'] }}" name="full_name" value="{{ entry['full_name'] or '' }}">
+                          </div>
+                          <div class="col-md-4">
+                            <label class="form-label small" for="phone-{{ entry['id'] }}">Phone</label>
+                            <input type="text" class="form-control form-control-sm" id="phone-{{ entry['id'] }}" name="phone" value="{{ entry['phone'] or '' }}">
+                          </div>
+                          <div class="col-md-8">
+                            <label class="form-label small" for="notes-{{ entry['id'] }}">Notes</label>
+                            <input type="text" class="form-control form-control-sm" id="notes-{{ entry['id'] }}" name="notes" value="{{ entry['notes'] or '' }}">
+                          </div>
+                          <div class="col-md-2">
+                            <div class="form-check form-switch mt-4 pt-1">
+                              <input class="form-check-input" type="checkbox" id="admin-{{ entry['id'] }}" name="is_admin" {% if entry['is_admin'] %}checked{% endif %}>
+                              <label class="form-check-label small" for="admin-{{ entry['id'] }}">Admin</label>
+                            </div>
+                          </div>
+                          <div class="col-md-2 text-md-end">
+                            <button type="submit" class="btn btn-sm btn-brand w-100">Save changes</button>
+                          </div>
+                        </form>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="4" class="text-center text-secondary py-4">No addresses yet. Add your first teammate to launch Google sign-in.</td>
                   </tr>
-                  <tr class="collapse bg-dark-subtle" id="reset-user-{{ user['id'] }}">
-                    <td colspan="4">
-                      <form method="post" class="row gy-2 gx-3 align-items-end">
-                        <input type="hidden" name="action" value="reset_password">
-                        <input type="hidden" name="user_id" value="{{ user['id'] }}">
-                        <div class="col-md-4">
-                          <label class="form-label small" for="new-password-{{ user['id'] }}">New password</label>
-                          <input type="password" class="form-control form-control-sm" id="new-password-{{ user['id'] }}" name="new_password" required>
-                        </div>
-                        <div class="col-md-4">
-                          <label class="form-label small" for="confirm-password-{{ user['id'] }}">Confirm</label>
-                          <input type="password" class="form-control form-control-sm" id="confirm-password-{{ user['id'] }}" name="confirm_password" required>
-                        </div>
-                        <div class="col-md-4 text-md-end">
-                          <button type="submit" class="btn btn-sm btn-brand w-100">Save new password</button>
-                        </div>
-                      </form>
-                    </td>
-                  </tr>
-                {% endfor %}
+                {% endif %}
               </tbody>
             </table>
           </div>

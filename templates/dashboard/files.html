@@ -27,11 +27,11 @@
                   {% for file in files %}
                     <tr>
                       <td class="fw-semibold">{{ file['original_name'] }}</td>
-                      <td>{{ file['username'] }}</td>
+                      <td>{{ file['uploader'] }}</td>
                       <td>{{ file['uploaded_at'] | default('') }}</td>
                       <td class="text-end">
                         <a class="btn btn-sm btn-outline-warning me-2" href="{{ url_for('download_file', file_id=file['id']) }}">Download</a>
-                        {% if session.get('is_admin') or session.get('username') == file['username'] %}
+                        {% if session.get('is_admin') or session.get('username') == file['uploader_username'] %}
                           <form class="d-inline" action="{{ url_for('delete_file', file_id=file['id']) }}" method="post" onsubmit="return confirm('Delete this file?');">
                             <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
                           </form>
