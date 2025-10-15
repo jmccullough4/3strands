@@ -53,7 +53,7 @@
             <a class="btn btn-brand" href="{{ url_for('file_share') }}">Jump to File Share</a>
             <a class="btn btn-outline-straw" href="{{ url_for('tasks_board') }}">Collaborate on Tasks</a>
             {% if session.get('is_admin') %}
-              <a class="btn btn-outline-straw" href="{{ url_for('manage_users') }}">Tune Access List</a>
+              <a class="btn btn-outline-straw" href="{{ url_for('manage_users') }}">Manage Users</a>
             {% endif %}
           </div>
         </div>

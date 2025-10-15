@@ -1,17 +1,14 @@
-import ipaddress
 import os
 import sqlite3
 from functools import wraps
 from pathlib import Path
 from typing import Dict, Iterable, Optional
-from urllib.parse import urlparse
 from uuid import uuid4
 
 from flask import (
     Flask,
     abort,
     flash,
-    make_response,
     redirect,
     render_template,
     request,
@@ -40,44 +37,6 @@ app.config.from_mapping(
 app.config.from_pyfile("config.py", silent=True)
 
 app.config.setdefault(
-    "EXTERNAL_BASE_URL",
-    os.getenv("EXTERNAL_BASE_URL") or "http://dashboard.3strands.co:8081",
-)
-app.config.setdefault(
-    "ALLOW_INSECURE_SAML_REDIRECTS",
-    os.getenv("ALLOW_INSECURE_SAML_REDIRECTS", "").lower()
-    in {"1", "true", "yes", "on"}
-    or bool(app.config["EXTERNAL_BASE_URL"].startswith("http://")),
-)
-app.config.setdefault(
-    "SAML_IDP_ENTITY_ID",
-    os.getenv("SAML_IDP_ENTITY_ID")
-    or "https://accounts.google.com/o/saml2?idpid=C040clheo",
-)
-app.config.setdefault(
-    "SAML_IDP_SSO_URL",
-    os.getenv("SAML_IDP_SSO_URL")
-    or "https://accounts.google.com/o/saml2/idp?idpid=C040clheo",
-)
-app.config.setdefault(
-    "SAML_IDP_X509CERT",
-    os.getenv("SAML_IDP_X509CERT")
-    or (
-        "MIIDdDCCAlygAwIBAgIGAZnp2SLbMA0GCSqGSIb3DQEBCwUAMHsxFDASBgNVBAoTC0dvb2dsZSBJbmMuMRYwFAYDVQQHEw1Nb3VudGFpbiBW"
-        "aWV3MQ8wDQYDVQQDEwZHb29nbGUxGDAWBgNVBAsTD0dvb2dsZSBGb3IgV29yazELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWEw"
-        "HhcNMjUxMDE1MjE0OTA1WhcNMzAxMDE0MjE0OTA1WjB7MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEP"
-        "MA0GA1UEAxMGR29vZ2xlMRgwFgYDVQQLEw9Hb29nbGUgRm9yIFdvcmsxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMIIBIjAN"
-        "BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx0zhfINES7iJ0gnEsKfSikxNwfQ6ltqFlcX8CPFrDnLORh1aP+un05Djx513Qhkqss+CwJJYH"
-        "+HYmdHOhoy3HsFMUt6Hj06C/v2dFLzIrhuY9ASzyr75TzAWUztTFWOwtyde1cfQlT+3obzJp1bQcWd7ok0HCOjRProbX61hSDM/uMGuqDUIUS"
-        "isctqP40NKYEn3XAu9k98C7dQIJEnlFBSR/OpNUIUAv1ORvjf+fRIlsXIo/TUndmyfp9oul1VvKWGh1F2A1+Ih3jQGTGxUAlNAUT4MnM2/Ew+"
-        "gEPummJE4u6GSzqijUT1+3ZJKCEdSn4cnriq9N+z7zebj4aSjBwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCosOuC9TX2XqwrPepEzZEiGlE/"
-        "kgq7feBOmefyj0voomj5VxKVyKWKtk0E/qd2ReN7eDZjrTKAuJof9YFcJqS7SeSl/XAW+KwhBvzdX8DN9T+A2Syg/p8tmSB64GWPF4HriHn6g"
-        "p/5SnYaAfeX7amADBTzmRbDd6cX8HRryK3Zt+VCGk05vbq+noHVV3WkY7Kxl1+MRMfCBZv3o5Sr3JvlhfVfFd0ccRtvpAepSsC9lkICDiCxde"
-        "3tkfG28byooNDYX3eyVy0Q1Ujg/yv/+OarchN058SLsXk3H9Zg/2FjEpe26qZu0jKTEPFK95/VYI4LCZ4gkVj/VDJG7RDHD8Cu"
-    ),
-)
-app.config.setdefault("SAML_SP_ENTITY_ID", os.getenv("SAML_SP_ENTITY_ID", ""))
-app.config.setdefault(
     "CALENDAR_EMBEDS",
     [
         {
@@ -102,144 +61,6 @@ def slugify(value: str) -> str:
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
     slug = "-".join(filter(None, slug.split("-")))
     return slug or "list"
-try:  # pragma: no cover - optional dependency checked at runtime
-    from onelogin.saml2.auth import OneLogin_Saml2_Auth
-    from onelogin.saml2.settings import OneLogin_Saml2_Settings
-except ImportError:  # pragma: no cover - handled at runtime when SAML is used
-    OneLogin_Saml2_Auth = None
-    OneLogin_Saml2_Settings = None
-
-
-def _assert_public_https(parsed_url, context: str) -> None:
-    allow_insecure = app.config.get("ALLOW_INSECURE_SAML_REDIRECTS", False)
-    if allow_insecure:
-        return
-
-    host = parsed_url.hostname
-    if host:
-        try:
-            ip = ipaddress.ip_address(host)
-        except ValueError:
-            ip = None
-        if ip and (ip.is_private or ip.is_loopback or ip.is_link_local):
-            raise RuntimeError(
-                f"{context} cannot point to a private or loopback address. Configure EXTERNAL_BASE_URL with your public HTTPS dashboard domain authorized in Google Cloud."
-            )
-        if ip and parsed_url.scheme != "https":
-            raise RuntimeError(
-                f"{context} must use https when referencing a direct IP address."
-            )
-
-    if parsed_url.scheme != "https":
-        # Permit http:// redirects for publicly routable hostnames when HTTPS isn't
-        # available yet, but encourage operators to secure the deployment.
-        if parsed_url.scheme == "http" and host and not host.replace(".", "").isdigit():
-            return
-        raise RuntimeError(
-            f"{context} must use https. Update EXTERNAL_BASE_URL to match the public domain registered in Google Cloud."
-        )
-
-
-def _saml_enabled() -> bool:
-    return bool(
-        OneLogin_Saml2_Auth
-        and app.config.get("SAML_IDP_ENTITY_ID")
-        and app.config.get("SAML_IDP_SSO_URL")
-        and app.config.get("SAML_IDP_X509CERT")
-    )
-
-
-def _require_saml_ready() -> None:
-    if OneLogin_Saml2_Auth is None or OneLogin_Saml2_Settings is None:
-        raise RuntimeError(
-            "SAML login requires the python3-saml package. Install it with 'pip install python3-saml'."
-        )
-    if not _saml_enabled():
-        raise RuntimeError(
-            "SAML identity provider details are missing. Update SAML_IDP_* settings in instance/config.py."
-        )
-
-
-def _saml_base_url() -> str:
-    base_url = app.config.get("EXTERNAL_BASE_URL")
-    if not base_url:
-        absolute = url_for("home", _external=True)
-        parsed = urlparse(absolute)
-        _assert_public_https(parsed, "Generated redirect URL")
-        return absolute.rstrip("/")
-
-    parsed_base = urlparse(base_url)
-    if not parsed_base.scheme or not parsed_base.netloc:
-        raise RuntimeError(
-            "EXTERNAL_BASE_URL must include scheme and host, e.g. https://dashboard.example.com"
-        )
-    _assert_public_https(parsed_base, "EXTERNAL_BASE_URL")
-    return base_url.rstrip("/")
-
-
-def _saml_settings() -> Dict:
-    _require_saml_ready()
-    base_url = _saml_base_url()
-    acs_url = f"{base_url}{url_for('auth_saml_acs', _external=False)}"
-    entity_id = (
-        app.config.get("SAML_SP_ENTITY_ID") or f"{base_url}{url_for('saml_metadata', _external=False)}"
-    )
-    return {
-        "strict": True,
-        "debug": app.debug,
-        "sp": {
-            "entityId": entity_id,
-            "assertionConsumerService": {
-                "url": acs_url,
-                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
-            },
-            "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-        },
-        "idp": {
-            "entityId": app.config["SAML_IDP_ENTITY_ID"],
-            "singleSignOnService": {
-                "url": app.config["SAML_IDP_SSO_URL"],
-                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
-            },
-            "x509cert": "".join(app.config["SAML_IDP_X509CERT"].split()),
-        },
-        "security": {
-            "authnRequestsSigned": False,
-            "logoutRequestSigned": False,
-            "logoutResponseSigned": False,
-            "wantAssertionsSigned": True,
-            "wantMessagesSigned": False,
-            "wantNameId": True,
-            "wantAttributeStatement": False,
-        },
-    }
-
-
-def _prepare_saml_request_data() -> Dict:
-    data = {
-        "https": "on" if request.scheme == "https" else "off",
-        "http_host": request.host,
-        "server_port": request.environ.get("SERVER_PORT"),
-        "script_name": request.path,
-        "get_data": request.args.copy(),
-        "post_data": request.form.copy(),
-    }
-    if request.query_string:
-        try:
-            data["query_string"] = request.query_string.decode()
-        except Exception:  # pragma: no cover - defensive fallback
-            data["query_string"] = ""
-    return data
-
-
-def _init_saml_auth():
-    settings = _saml_settings()
-    request_data = _prepare_saml_request_data()
-    return OneLogin_Saml2_Auth(request_data, old_settings=settings)
-
-
-def _normalize_email(value: str) -> str:
-    return value.strip().lower()
 
 
 def _ensure_unique_list_slug(conn: sqlite3.Connection, base: str) -> str:
@@ -260,7 +81,7 @@ def _fetch_task_lists(conn: sqlite3.Connection) -> Iterable[sqlite3.Row]:
     ).fetchall()
 
 
-def _set_user_session(user: sqlite3.Row, provider: str) -> None:
+def _set_user_session(user: sqlite3.Row, provider: str = "local") -> None:
     session["user_id"] = user["id"]
     session["username"] = user["username"]
     email_value = user["email"] if "email" in user.keys() else None
@@ -284,18 +105,6 @@ def init_db():
                 email TEXT UNIQUE,
                 phone TEXT,
                 google_sub TEXT UNIQUE
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS allowed_emails (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL,
-                full_name TEXT,
-                phone TEXT,
-                is_admin INTEGER NOT NULL DEFAULT 0,
-                notes TEXT
             )
             """
         )
@@ -611,102 +420,128 @@ def delete_file(file_id: int):
     return redirect(url_for("file_share"))
 
 
+@app.route("/admin/users", methods=["GET", "POST"])
 @app.route("/admin/access", methods=["GET", "POST"])
 @admin_required
 def manage_users():
     if request.method == "POST":
         action = request.form.get("action", "create")
-        email_input = _normalize_email(request.form.get("email", ""))
-        full_name = request.form.get("full_name", "").strip() or None
-        phone = request.form.get("phone", "").strip() or None
-        notes = request.form.get("notes", "").strip() or None
-        is_admin = 1 if request.form.get("is_admin") == "on" else 0
 
         if action == "delete":
-            entry_id = request.form.get("entry_id", "").strip()
-            if not entry_id.isdigit():
-                flash("Unable to determine which email to remove.", "danger")
+            user_id = request.form.get("user_id", "").strip()
+            if not user_id.isdigit():
+                flash("Unable to determine which account to remove.", "danger")
+            elif int(user_id) == session.get("user_id"):
+                flash("You cannot remove your own account while signed in.", "danger")
             else:
                 with get_db_connection() as conn:
-                    conn.execute("DELETE FROM allowed_emails WHERE id = ?", (int(entry_id),))
+                    conn.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
                     conn.commit()
-                flash("Access removed for that address.", "info")
+                flash("User removed from the dashboard.", "info")
             return redirect(url_for("manage_users"))
 
-        if not email_input or "@" not in email_input:
-            flash("Please provide a valid email address.", "warning")
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip() or None
+        full_name = request.form.get("full_name", "").strip() or None
+        phone = request.form.get("phone", "").strip() or None
+        is_admin = 1 if request.form.get("is_admin") == "on" else 0
+
+        if not username:
+            flash("Username is required.", "warning")
             return redirect(url_for("manage_users"))
 
         if action == "update":
-            entry_id = request.form.get("entry_id", "").strip()
-            if not entry_id.isdigit():
-                flash("Unable to determine which email to update.", "danger")
+            user_id = request.form.get("user_id", "").strip()
+            if not user_id.isdigit():
+                flash("Unable to determine which account to update.", "danger")
                 return redirect(url_for("manage_users"))
+
+            password_value = request.form.get("password", "").strip()
             with get_db_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE allowed_emails
-                    SET email = ?, full_name = ?, phone = ?, notes = ?, is_admin = ?
-                    WHERE id = ?
-                    """,
-                    (email_input, full_name, phone, notes, is_admin, int(entry_id)),
-                )
-                conn.commit()
-                conn.execute(
-                    """
-                    UPDATE users
-                    SET full_name = COALESCE(?, full_name),
-                        email = COALESCE(?, email),
-                        phone = COALESCE(?, phone),
-                        is_admin = CASE WHEN ? = 1 THEN 1 ELSE is_admin END
-                    WHERE email = ?
-                    """,
-                    (full_name, email_input, phone, is_admin, email_input),
-                )
-                conn.commit()
-            flash("Access details updated.", "success")
+                try:
+                    conn.execute(
+                        """
+                        UPDATE users
+                        SET username = ?, full_name = ?, email = ?, phone = ?, is_admin = ?
+                        WHERE id = ?
+                        """,
+                        (username, full_name, email, phone, is_admin, int(user_id)),
+                    )
+                    if password_value:
+                        if len(password_value) < 8:
+                            flash("Passwords must be at least 8 characters when resetting an account.", "warning")
+                            return redirect(url_for("manage_users"))
+                        conn.execute(
+                            "UPDATE users SET password_hash = ? WHERE id = ?",
+                            (generate_password_hash(password_value), int(user_id)),
+                        )
+                    conn.commit()
+                except sqlite3.IntegrityError:
+                    flash(
+                        "That username or email is already in use by another account.",
+                        "danger",
+                    )
+                    return redirect(url_for("manage_users"))
+
+            flash("Account details updated.", "success")
             return redirect(url_for("manage_users"))
 
-        # default: create/update entry
+        password_value = request.form.get("password", "").strip()
+        if not password_value:
+            flash("Please provide a password for the new account.", "warning")
+            return redirect(url_for("manage_users"))
+        if len(password_value) < 8:
+            flash("Passwords must be at least 8 characters when creating a new account.", "warning")
+            return redirect(url_for("manage_users"))
+
         with get_db_connection() as conn:
             try:
                 conn.execute(
                     """
-                    INSERT INTO allowed_emails (email, full_name, phone, notes, is_admin)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO users (username, password_hash, is_admin, full_name, email, phone)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (email_input, full_name, phone, notes, is_admin),
+                    (
+                        username,
+                        generate_password_hash(password_value),
+                        is_admin,
+                        full_name,
+                        email,
+                        phone,
+                    ),
                 )
                 conn.commit()
             except sqlite3.IntegrityError:
-                flash("That email address is already authorized.", "warning")
+                flash("That username or email is already in use.", "danger")
                 return redirect(url_for("manage_users"))
-        flash("Team member authorized. They can now sign in with Google Workspace.", "success")
+
+        flash("Teammate account created.", "success")
         return redirect(url_for("manage_users"))
 
     with get_db_connection() as conn:
-        allowed = conn.execute(
+        users = conn.execute(
             """
-            SELECT id, email, full_name, phone, notes, is_admin
-            FROM allowed_emails
-            ORDER BY COALESCE(NULLIF(full_name, ''), email)
+            SELECT id, username, full_name, email, phone, is_admin
+            FROM users
+            ORDER BY username
             """
         ).fetchall()
-    return render_template("admin/manage_users.html", allowed=allowed)
+    return render_template("admin/manage_users.html", users=users)
 
 
 @app.route("/account/password", methods=["GET", "POST"])
 @login_required
 def change_password():
-    if session.get("auth_provider") != "local":
-        abort(403)
     if request.method == "POST":
-        current_password = request.form.get("current_password", "")
-        new_password = request.form.get("new_password", "")
-        confirm_password = request.form.get("confirm_password", "")
+        current_password = request.form.get("current_password", "").strip()
+        new_password = request.form.get("new_password", "").strip()
+        confirm_password = request.form.get("confirm_password", "").strip()
 
         if not new_password:
             flash("Please provide a new password.", "warning")
+            return redirect(url_for("change_password"))
+        if len(new_password) < 8:
+            flash("Choose a password that is at least 8 characters long.", "warning")
             return redirect(url_for("change_password"))
         if new_password != confirm_password:
             flash("New password and confirmation do not match.", "danger")
@@ -717,11 +552,21 @@ def change_password():
                 "SELECT password_hash FROM users WHERE id = ?",
                 (session["user_id"],),
             ).fetchone()
-            if not user or not user["password_hash"]:
-                flash("Password authentication is not available for this account.", "danger")
+            if not user:
+                flash("We couldn't load your account. Please sign in again.", "danger")
+                return redirect(url_for("login"))
+
+            stored_hash = user["password_hash"]
+            if stored_hash:
+                if not current_password or not check_password_hash(stored_hash, current_password):
+                    flash("Current password is incorrect.", "danger")
+                    return redirect(url_for("change_password"))
+            elif not session.get("is_admin"):
+                flash("Ask an administrator to set a password for your account first.", "danger")
                 return redirect(url_for("dashboard"))
-            if not check_password_hash(user["password_hash"], current_password):
-                flash("Current password is incorrect.", "danger")
+
+            if stored_hash and check_password_hash(stored_hash, new_password):
+                flash("Your new password must be different from your current password.", "warning")
                 return redirect(url_for("change_password"))
 
             conn.execute(
@@ -749,9 +594,9 @@ def login():
                 """
                 SELECT id, username, password_hash, is_admin, full_name, email
                 FROM users
-                WHERE username = ?
+                WHERE username = ? OR email = ?
                 """,
-                (username,),
+                (username, username),
             ).fetchone()
         if user and user["password_hash"] and check_password_hash(user["password_hash"], password):
             _set_user_session(user, provider="local")
@@ -759,133 +604,7 @@ def login():
             return redirect(url_for("dashboard"))
         flash("Invalid username or password.", "danger")
         return redirect(url_for("login"))
-    return render_template(
-        "auth/login.html",
-        saml_ready=_saml_enabled(),
-    )
-
-
-@app.route("/auth/saml/login")
-def auth_saml_login():
-    try:
-        auth = _init_saml_auth()
-    except RuntimeError as exc:
-        flash(str(exc), "danger")
-        return redirect(url_for("login"))
-
-    return redirect(auth.login())
-
-
-@app.route("/auth/saml/acs", methods=["POST"])
-def auth_saml_acs():
-    try:
-        auth = _init_saml_auth()
-    except RuntimeError as exc:
-        flash(str(exc), "danger")
-        return redirect(url_for("login"))
-
-    auth.process_response()
-    errors = auth.get_errors()
-    if errors:
-        flash(", ".join(errors) or "The identity provider rejected the request.", "danger")
-        return redirect(url_for("login"))
-    if not auth.is_authenticated():
-        flash("We couldn't verify your Google Workspace login.", "danger")
-        return redirect(url_for("login"))
-
-    attributes = auth.get_attributes()
-    nameid = auth.get_nameid() or ""
-    email = _normalize_email(nameid)
-    if not email:
-        email_attrs = attributes.get("email") or attributes.get("Email")
-        if email_attrs:
-            email = _normalize_email(email_attrs[0])
-    if not email:
-        flash("Your Google Workspace identity must include an email address.", "danger")
-        return redirect(url_for("login"))
-
-    with get_db_connection() as conn:
-        allowed = conn.execute(
-            "SELECT id, full_name, phone, is_admin FROM allowed_emails WHERE email = ?",
-            (email,),
-        ).fetchone()
-    if allowed is None:
-        flash("That email address hasn't been authorized yet. Please ask the admin for access.", "danger")
-        return redirect(url_for("login"))
-
-    full_name = allowed["full_name"] or attributes.get("displayName", [None])[0]
-    with get_db_connection() as conn:
-        existing = conn.execute(
-            "SELECT id, username, full_name, email, phone, is_admin FROM users WHERE email = ?",
-            (email,),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                """
-                UPDATE users
-                SET full_name = ?, phone = COALESCE(?, phone), google_sub = ?, username = ?, email = ?,
-                    is_admin = CASE WHEN ? = 1 THEN 1 ELSE is_admin END
-                WHERE id = ?
-                """,
-                (
-                    full_name or existing["full_name"],
-                    allowed["phone"],
-                    nameid,
-                    email,
-                    email,
-                    int(allowed["is_admin"]),
-                    existing["id"],
-                ),
-            )
-            conn.commit()
-            user = conn.execute(
-                "SELECT id, username, full_name, email, is_admin FROM users WHERE id = ?",
-                (existing["id"],),
-            ).fetchone()
-        else:
-            cursor = conn.execute(
-                """
-                INSERT INTO users (username, full_name, email, phone, is_admin, google_sub)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    email,
-                    full_name,
-                    email,
-                    allowed["phone"],
-                    int(allowed["is_admin"]),
-                    nameid,
-                ),
-            )
-            conn.commit()
-            user = conn.execute(
-                "SELECT id, username, full_name, email, is_admin FROM users WHERE id = ?",
-                (cursor.lastrowid,),
-            ).fetchone()
-
-    _set_user_session(user, provider="saml")
-    session["display_name"] = full_name or session.get("display_name")
-    session["saml_nameid"] = nameid
-    session["saml_session_index"] = auth.get_session_index()
-    flash("Signed in with Google Workspace.", "success")
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/auth/saml/metadata")
-def saml_metadata():
-    try:
-        settings = OneLogin_Saml2_Settings(_saml_settings(), None)
-    except RuntimeError as exc:
-        return make_response(str(exc), 500)
-
-    metadata = settings.get_sp_metadata()
-    errors = settings.validate_metadata(metadata)
-    if errors:
-        return make_response("; ".join(errors), 500)
-
-    response = make_response(metadata, 200)
-    response.headers["Content-Type"] = "application/samlmetadata+xml"
-    return response
+    return render_template("auth/login.html")
 
 
 @app.route("/logout")

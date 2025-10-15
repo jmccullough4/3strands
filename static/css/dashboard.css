@@ -143,25 +143,6 @@ body {
   color: #fff1b5;
 }
 
-.btn-google {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(245, 217, 125, 0.45);
-  background: rgba(12, 20, 28, 0.6);
-  color: #f5d97d;
-  padding: 0.6rem 1rem;
-  font-weight: 600;
-  border-radius: 0.75rem;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.btn-google:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-  color: #fff1b5;
-}
-
 .table thead {
   border-bottom: 2px solid rgba(212, 175, 55, 0.4);
 }
