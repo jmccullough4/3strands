@@ -1,8 +1,10 @@
+import ipaddress
 import os
 import sqlite3
 from functools import wraps
 from pathlib import Path
 from typing import Dict, Iterable, Optional
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
@@ -83,11 +85,29 @@ def _require_google_oauth_ready() -> None:
 
 
 def _external_url(endpoint: str) -> str:
+    path = url_for(endpoint, _external=False)
     base_url = app.config.get("EXTERNAL_BASE_URL")
     if base_url:
         base_url = base_url.rstrip("/")
-        return f"{base_url}{url_for(endpoint, _external=False)}"
-    return url_for(endpoint, _external=True)
+        return f"{base_url}{path}"
+
+    absolute_url = url_for(endpoint, _external=True)
+    parsed = urlparse(absolute_url)
+    host = parsed.hostname
+    if host:
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            ip = None
+        if ip and (ip.is_private or ip.is_loopback or ip.is_link_local):
+            raise RuntimeError(
+                "Google OAuth cannot redirect to private or loopback addresses. Set EXTERNAL_BASE_URL to your public dashboard URL registered in Google Cloud."
+            )
+    if parsed.scheme != "https":
+        raise RuntimeError(
+            "Google OAuth requires an HTTPS EXTERNAL_BASE_URL that matches an authorized redirect URI in Google Cloud."
+        )
+    return absolute_url
 
 
 def _build_google_flow(state: Optional[str] = None) -> Flow:
