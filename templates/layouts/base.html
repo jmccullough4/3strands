@@ -8,28 +8,27 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
   </head>
   <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-warning-subtle sticky-top shadow-sm">
-      <div class="container-fluid position-relative d-flex align-items-center flex-wrap gap-3">
-        <button class="navbar-toggler order-0" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+    <nav class="navbar navbar-expand-lg bg-dark border-bottom border-warning-subtle sticky-top">
+      <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center gap-3" href="{{ url_for('index') }}">
+          <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo" class="rounded shadow-sm">
+          <span class="fw-semibold text-uppercase letter-spacing-1">3 Strands Cattle Co.</span>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
         </button>
-        <div class="collapse navbar-collapse flex-grow-0 order-3 order-lg-0 w-100 w-lg-auto" id="mainNav">
-          <ul class="navbar-nav mb-2 mb-lg-0 align-items-lg-center gap-lg-3">
+        <div class="collapse navbar-collapse" id="mainNav">
+          <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center gap-lg-3">
             {% if session.get('username') %}
-              <li class="nav-item text-warning text-uppercase small fw-semibold">Signed in as {{ session['username'] }}</li>
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('change_password') }}">Change password</a></li>
-              {% if session.get('is_admin') %}
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_users') }}">User management</a></li>
-              {% endif %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Sign out</a></li>
+            <li class="nav-item text-warning text-uppercase small">Signed in as {{ session['username'] }}</li>
+            {% if session.get('is_admin') %}
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_users') }}">User Management</a></li>
+            {% endif %}
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Sign out</a></li>
             {% else %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Sign in</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Sign in</a></li>
             {% endif %}
           </ul>
-        </div>
-        <a class="navbar-title text-uppercase fw-semibold letter-spacing-1 text-decoration-none order-1 order-lg-1" href="{{ url_for('index') }}">3 Strands Cattle Co.</a>
-        <div class="navbar-logo ms-auto order-2 order-lg-2">
-          <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo" class="rounded shadow-sm">
         </div>
       </div>
     </nav>

@@ -4,48 +4,9 @@ body {
   min-height: 100vh;
 }
 
-.navbar {
-  min-height: 72px;
-}
-
-.navbar-title {
-  color: #f5d97d;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  letter-spacing: 0.12rem;
-}
-
-.letter-spacing-1 {
-  letter-spacing: 0.12rem;
-}
-
-.navbar-logo {
-  display: flex;
-  align-items: center;
-}
-
-.navbar-logo img {
-  height: 56px;
+.navbar-brand img {
+  height: 48px;
   width: auto;
-}
-
-.navbar-nav .nav-link {
-  color: #f5d97d;
-}
-
-.navbar-nav .nav-link:hover,
-.navbar-nav .nav-link:focus {
-  color: #fff1b5;
-}
-
-.navbar-toggler {
-  border-color: rgba(245, 217, 125, 0.6);
-}
-
-.navbar-toggler-icon {
-  filter: invert(92%);
 }
 
 .card {
@@ -70,6 +31,10 @@ body {
   color: #0b1620;
 }
 
+.letter-spacing-1 {
+  letter-spacing: 0.12rem;
+}
+
 .table thead {
   border-bottom: 2px solid rgba(212, 175, 55, 0.4);
 }
@@ -84,18 +49,4 @@ a {
 
 a:hover {
   color: #fff1b5;
-}
-
-@media (max-width: 991.98px) {
-  .navbar-title {
-    position: static;
-    transform: none;
-    margin: 0 auto;
-    padding: 0.5rem 0;
-    text-align: center;
-  }
-
-  .navbar-logo {
-    margin-left: auto;
-  }
 }
