@@ -1,76 +1,22 @@
 body {
-  background: radial-gradient(circle at top left, rgba(64, 47, 26, 0.8), #080d11),
-    url("https://images.unsplash.com/photo-1500595046743-cd271d694d30?auto=format&fit=crop&w=1920&q=80") center/cover fixed;
+  background: radial-gradient(circle at top left, #1b2a38, #0d141b);
   color: #e6edf3;
   min-height: 100vh;
 }
 
-.navbar {
-  min-height: 72px;
-  background: linear-gradient(135deg, rgba(20, 28, 34, 0.95), rgba(35, 52, 43, 0.9));
-}
-
-.nav-container {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 1rem;
-}
-
-.navbar-title {
-  color: #f5d97d;
-  text-align: center;
-  letter-spacing: 0.18rem;
-}
-
-.letter-spacing-1 {
-  letter-spacing: 0.12rem;
-}
-
-.navbar-logo {
-  display: flex;
-  align-items: center;
-}
-
-.navbar-logo img {
-  height: 56px;
+.navbar-brand img {
+  height: 48px;
   width: auto;
-}
-
-.navbar-nav .nav-link {
-  color: #f5d97d;
-}
-
-.navbar-nav .nav-link:hover,
-.navbar-nav .nav-link:focus {
-  color: #fff1b5;
-}
-
-.navbar-toggler {
-  border-color: rgba(245, 217, 125, 0.6);
-}
-
-.navbar-toggler-icon {
-  filter: invert(92%);
 }
 
 .card {
   background-color: rgba(12, 20, 28, 0.9);
-  border: 1px solid rgba(255, 215, 0, 0.2);
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45);
-}
-
-.card-farm {
-  background: linear-gradient(135deg, rgba(30, 43, 35, 0.95), rgba(22, 31, 44, 0.92));
-  border: 1px solid rgba(152, 202, 121, 0.4);
+  border: 1px solid rgba(255, 215, 0, 0.15);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
 .brand-accent {
   color: #d4af37;
-}
-
-.brand-emerald {
-  color: #98ca79;
 }
 
 .btn-brand {
@@ -85,14 +31,8 @@ body {
   color: #0b1620;
 }
 
-.btn-outline-straw {
-  border-color: rgba(245, 217, 125, 0.6);
-  color: #f5d97d;
-}
-
-.btn-outline-straw:hover {
-  background-color: rgba(245, 217, 125, 0.15);
-  color: #fff1b5;
+.letter-spacing-1 {
+  letter-spacing: 0.12rem;
 }
 
 .table thead {
@@ -109,34 +49,4 @@ a {
 
 a:hover {
   color: #fff1b5;
-}
-
-.cooler-placeholder {
-  background: linear-gradient(135deg, rgba(16, 24, 31, 0.92), rgba(19, 33, 44, 0.9));
-  border: 1px solid rgba(120, 190, 255, 0.25);
-}
-
-.cooler-placeholder .temp-pill {
-  background: rgba(120, 190, 255, 0.15);
-  border-radius: 999px;
-  padding: 0.25rem 0.75rem;
-  color: #b8e3ff;
-  font-weight: 600;
-}
-
-@media (max-width: 991.98px) {
-  .nav-container {
-    grid-template-columns: 1fr auto;
-    align-items: start;
-  }
-
-  .navbar-title {
-    order: 3;
-    grid-column: 1 / -1;
-    padding: 0.5rem 0;
-  }
-
-  .navbar-logo {
-    margin-left: auto;
-  }
 }

@@ -7,7 +7,6 @@
           <h2 class="h4 brand-accent mb-3">Create a new user</h2>
           <p class="text-secondary">Administrators can create additional dashboard accounts and optionally grant admin privileges.</p>
           <form method="post" class="d-grid gap-3">
-            <input type="hidden" name="action" value="create">
             <div>
               <label for="username" class="form-label">Username</label>
               <input type="text" class="form-control" id="username" name="username" placeholder="Enter username" required>
@@ -51,28 +50,8 @@
                       {% endif %}
                     </td>
                     <td class="text-end">
-                      <button class="btn btn-sm btn-outline-straw me-2" type="button" data-bs-toggle="collapse" data-bs-target="#reset-user-{{ user['id'] }}" aria-expanded="false" aria-controls="reset-user-{{ user['id'] }}">Reset password</button>
                       <form action="{{ url_for('delete_user', user_id=user['id']) }}" method="post" class="d-inline" onsubmit="return confirm('Remove this user?');">
                         <button type="submit" class="btn btn-sm btn-outline-danger" {% if user['id'] == session.get('user_id') %}disabled{% endif %}>Delete</button>
-                      </form>
-                    </td>
-                  </tr>
-                  <tr class="collapse bg-dark-subtle" id="reset-user-{{ user['id'] }}">
-                    <td colspan="3">
-                      <form method="post" class="row gy-2 gx-3 align-items-end">
-                        <input type="hidden" name="action" value="reset_password">
-                        <input type="hidden" name="user_id" value="{{ user['id'] }}">
-                        <div class="col-md-4">
-                          <label class="form-label small" for="new-password-{{ user['id'] }}">New password</label>
-                          <input type="password" class="form-control form-control-sm" id="new-password-{{ user['id'] }}" name="new_password" required>
-                        </div>
-                        <div class="col-md-4">
-                          <label class="form-label small" for="confirm-password-{{ user['id'] }}">Confirm</label>
-                          <input type="password" class="form-control form-control-sm" id="confirm-password-{{ user['id'] }}" name="confirm_password" required>
-                        </div>
-                        <div class="col-md-4 text-md-end">
-                          <button type="submit" class="btn btn-sm btn-brand w-100">Save new password</button>
-                        </div>
                       </form>
                     </td>
                   </tr>

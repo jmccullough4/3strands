@@ -28,10 +28,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY="change-this-secret-key",  # consider loading from env
+    SECRET_KEY="change-this-secret-key",
     UPLOAD_FOLDER=str(UPLOAD_DIR),
     MAX_CONTENT_LENGTH=20 * 1024 * 1024,  # 20 MB
-    _DB_INIT=False,  # guard to ensure init_db() runs once in Flask 3.x
 )
 
 
@@ -62,7 +61,10 @@ def init_db():
         conn.commit()
 
         # Ensure an admin account exists
-        cur = conn.execute("SELECT id FROM users WHERE username = ?", ("admin",))
+        cur = conn.execute(
+            "SELECT id FROM users WHERE username = ?",
+            ("admin",),
+        )
         if cur.fetchone() is None:
             conn.execute(
                 "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)",
@@ -99,16 +101,9 @@ def admin_required(view_func):
     return wrapped_view
 
 
-# ---- Flask 3.x-compatible one-time initializer (replaces @before_first_request) ----
-def _ensure_db_initialized():
-    if not app.config.get("_DB_INIT", False):
-        init_db()
-        app.config["_DB_INIT"] = True
-
-
-# Register the guard to run before each request; it will effectively run once.
-app.before_request(_ensure_db_initialized)
-# -------------------------------------------------------------------------------
+@app.before_first_request
+def setup():
+    init_db()
 
 
 @app.route("/")
@@ -174,18 +169,25 @@ def download_file(file_id: int):
     if not file_path.exists():
         abort(404)
 
-    send_kwargs = {"as_attachment": True, "download_name": file_row["original_name"]}
+    send_kwargs = {
+        "as_attachment": True,
+        "download_name": file_row["original_name"],
+    }
 
     try:
         return send_from_directory(
-            app.config["UPLOAD_FOLDER"], file_row["stored_name"], **send_kwargs
+            app.config["UPLOAD_FOLDER"],
+            file_row["stored_name"],
+            **send_kwargs,
         )
     except TypeError:
-        # Flask < 2.0 compatibility
+        # Flask < 2.0 uses the attachment_filename argument
         send_kwargs.pop("download_name", None)
         send_kwargs["attachment_filename"] = file_row["original_name"]
         return send_from_directory(
-            app.config["UPLOAD_FOLDER"], file_row["stored_name"], **send_kwargs
+            app.config["UPLOAD_FOLDER"],
+            file_row["stored_name"],
+            **send_kwargs,
         )
 
 
@@ -216,31 +218,6 @@ def delete_file(file_id: int):
 @admin_required
 def manage_users():
     if request.method == "POST":
-        action = request.form.get("action", "create")
-        if action == "reset_password":
-            target_id = request.form.get("user_id", "").strip()
-            new_password = request.form.get("new_password", "")
-            confirm_password = request.form.get("confirm_password", "")
-
-            if not target_id.isdigit():
-                flash("Unable to identify which user to update.", "danger")
-            elif not new_password:
-                flash("Please provide a new password.", "warning")
-            elif new_password != confirm_password:
-                flash("New password and confirmation do not match.", "danger")
-            else:
-                with get_db_connection() as conn:
-                    cursor = conn.execute(
-                        "UPDATE users SET password_hash = ? WHERE id = ?",
-                        (generate_password_hash(new_password), int(target_id)),
-                    )
-                    conn.commit()
-                if cursor.rowcount:
-                    flash("Password updated successfully.", "success")
-                else:
-                    flash("User could not be found.", "danger")
-            return redirect(url_for("manage_users"))
-
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         if not username or not password:
@@ -260,7 +237,6 @@ def manage_users():
                 flash("User created successfully.", "success")
             except sqlite3.IntegrityError:
                 flash("That username is already taken.", "danger")
-        return redirect(url_for("manage_users"))
     with get_db_connection() as conn:
         users = conn.execute(
             "SELECT id, username, is_admin FROM users ORDER BY username"
@@ -279,42 +255,6 @@ def delete_user(user_id: int):
         conn.commit()
     flash("User removed.", "info")
     return redirect(url_for("manage_users"))
-
-
-@app.route("/account/password", methods=["GET", "POST"])
-@login_required
-def change_password():
-    if request.method == "POST":
-        current_password = request.form.get("current_password", "")
-        new_password = request.form.get("new_password", "")
-        confirm_password = request.form.get("confirm_password", "")
-
-        if not new_password:
-            flash("Please provide a new password.", "warning")
-            return redirect(url_for("change_password"))
-        if new_password != confirm_password:
-            flash("New password and confirmation do not match.", "danger")
-            return redirect(url_for("change_password"))
-
-        with get_db_connection() as conn:
-            user = conn.execute(
-                "SELECT password_hash FROM users WHERE id = ?",
-                (session["user_id"],),
-            ).fetchone()
-            if not user or not check_password_hash(user["password_hash"], current_password):
-                flash("Current password is incorrect.", "danger")
-                return redirect(url_for("change_password"))
-
-            conn.execute(
-                "UPDATE users SET password_hash = ? WHERE id = ?",
-                (generate_password_hash(new_password), session["user_id"]),
-            )
-            conn.commit()
-
-        flash("Your password has been updated.", "success")
-        return redirect(url_for("index"))
-
-    return render_template("auth/change_password.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -347,4 +287,4 @@ def logout():
 
 if __name__ == "__main__":
     init_db()
-    app.run(host="0.0.0.0", port=8081, debug=True)
+    app.run(debug=True)
