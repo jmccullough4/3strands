@@ -31,13 +31,14 @@ DATABASE = INSTANCE_DIR / "dashboard.db"
 INSTANCE_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-app = Flask(__name__)
-app.config.update(
-    SECRET_KEY="change-this-secret-key",  # consider loading from env
+app = Flask(__name__, instance_relative_config=True)
+app.config.from_mapping(
+    SECRET_KEY="change-this-secret-key",  # consider loading from env or instance/config.py
     UPLOAD_FOLDER=str(UPLOAD_DIR),
     MAX_CONTENT_LENGTH=20 * 1024 * 1024,  # 20 MB
     _DB_INIT=False,  # guard to ensure init_db() runs once in Flask 3.x
 )
+app.config.from_pyfile("config.py", silent=True)
 
 GOOGLE_OAUTH_SCOPES = (
     "openid",
@@ -48,12 +49,16 @@ GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
 
 app.config.setdefault("GOOGLE_CLIENT_ID", os.getenv("GOOGLE_CLIENT_ID", ""))
 app.config.setdefault("GOOGLE_CLIENT_SECRET", os.getenv("GOOGLE_CLIENT_SECRET", ""))
-app.config.setdefault("GOOGLE_APPS_DOMAIN", os.getenv("GOOGLE_APPS_DOMAIN", "3strands.co"))
-app.config.setdefault("EXTERNAL_BASE_URL", os.getenv("EXTERNAL_BASE_URL"))
+app.config.setdefault("GOOGLE_APPS_DOMAIN", os.getenv("GOOGLE_APPS_DOMAIN", ""))
+app.config.setdefault(
+    "EXTERNAL_BASE_URL",
+    os.getenv("EXTERNAL_BASE_URL") or "http://dashboard.3strands.co:8081",
+)
 app.config.setdefault(
     "ALLOW_INSECURE_GOOGLE_REDIRECTS",
     os.getenv("ALLOW_INSECURE_GOOGLE_REDIRECTS", "").lower()
-    in {"1", "true", "yes", "on"},
+    in {"1", "true", "yes", "on"}
+    or bool(app.config["EXTERNAL_BASE_URL"].startswith("http://")),
 )
 app.config.setdefault(
     "CALENDAR_EMBEDS",
@@ -94,11 +99,6 @@ def _assert_public_https(parsed_url, context: str) -> None:
     if allow_insecure:
         return
 
-    if parsed_url.scheme != "https":
-        raise RuntimeError(
-            f"{context} must use https. Update EXTERNAL_BASE_URL to match the public domain registered in Google Cloud or set ALLOW_INSECURE_GOOGLE_REDIRECTS=1 only for local testing."
-        )
-
     host = parsed_url.hostname
     if host:
         try:
@@ -109,6 +109,19 @@ def _assert_public_https(parsed_url, context: str) -> None:
             raise RuntimeError(
                 f"{context} cannot point to a private or loopback address. Configure EXTERNAL_BASE_URL with your public HTTPS dashboard domain authorized in Google Cloud."
             )
+        if ip and parsed_url.scheme != "https":
+            raise RuntimeError(
+                f"{context} must use https when referencing a direct IP address."
+            )
+
+    if parsed_url.scheme != "https":
+        # Permit http:// redirects for publicly routable hostnames when HTTPS isn't
+        # available yet, but encourage operators to secure the deployment.
+        if parsed_url.scheme == "http" and host and not host.replace(".", "").isdigit():
+            return
+        raise RuntimeError(
+            f"{context} must use https. Update EXTERNAL_BASE_URL to match the public domain registered in Google Cloud."
+        )
 
 
 def _external_url(endpoint: str) -> str:
@@ -737,14 +750,6 @@ def auth_google_callback():
     email = _normalize_email(profile.get("email", ""))
     if not email or not profile.get("email_verified", profile.get("verified_email")):
         flash("Your Google account must have a verified email address.", "danger")
-        return redirect(url_for("login"))
-
-    domain = (app.config.get("GOOGLE_APPS_DOMAIN") or "").strip().lower()
-    if domain and not email.endswith(f"@{domain}"):
-        flash(
-            "Please sign in with your 3 Strands corporate Google Workspace account.",
-            "danger",
-        )
         return redirect(url_for("login"))
 
     with get_db_connection() as conn:

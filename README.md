@@ -2,19 +2,17 @@
 
 ### Google Workspace single sign-on
 
-Set the following environment variables before running the Flask app so team members can sign in with their corporate accounts:
+Provide your Google OAuth client credentials either by exporting environment variables **or** by creating an `instance/config.py` file next to `dashboard.db` with values such as:
 
+```python
+GOOGLE_CLIENT_ID = "<OAuth client ID>"
+GOOGLE_CLIENT_SECRET = "<OAuth client secret>"
+# Optional: supply a hosted URL if it differs from the default http://dashboard.3strands.co:8081
+EXTERNAL_BASE_URL = "https://dashboard.3strands.co"
+# Optional: hint Google to prefer a Workspace domain (leave blank to allow any Google account)
+GOOGLE_APPS_DOMAIN = ""
 ```
-export GOOGLE_CLIENT_ID="<OAuth client ID>"
-export GOOGLE_CLIENT_SECRET="<OAuth client secret>"
-export GOOGLE_APPS_DOMAIN="3strands.co"
-export EXTERNAL_BASE_URL="https://dashboard.3strands.co"  # public HTTPS URL configured in Google Cloud
-# optional: relax checks only during local prototyping
-export ALLOW_INSECURE_GOOGLE_REDIRECTS=0
-```
 
-Only addresses that the admin authorizes inside the Access Control panel will be able to authenticate.
+Only addresses that the admin authorizes inside the Access Control panel will be able to authenticate, even if the Google account belongs to another domain.
 
-> **Note:** Google rejects OAuth callbacks that point to private IPs (for example, `http://192.168.x.x`).
-> Set `EXTERNAL_BASE_URL` to a publicly routable **HTTPS** host that you've registered as an authorized redirect URI in your Google Cloud console (e.g., `https://dashboard.3strands.co`).
-> The `ALLOW_INSECURE_GOOGLE_REDIRECTS=1` flag skips these checks only for local prototyping; Google may still block callbacks that aren't HTTPS or use private IPs.
+> **Note:** Google still requires redirect URIs to match the origins configured for your OAuth client and may block callbacks that use private IP addresses. For production deployments, secure the dashboard with HTTPS and register that public URL in Google Cloud. The application allows `http://` redirects for public hostnames so you can prototype without manually setting flags, but Google may enforce HTTPS depending on your project settings.
