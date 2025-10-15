@@ -101,7 +101,9 @@ def admin_required(view_func):
     return wrapped_view
 
 
-init_db()
+@app.before_first_request
+def setup():
+    init_db()
 
 
 @app.route("/")
