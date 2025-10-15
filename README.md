@@ -16,4 +16,4 @@ The server listens on port `8081` by default. Uploads are stored in the `uploads
 
 ### Updating the calendars
 
-The shared Google Calendar embeds on the dashboard pull from the `CALENDAR_EMBEDS` configuration in `app.py` (or `instance/config.py`). Replace the placeholder URLs with the calendars you want to surface to the team.
+By default the dashboard surfaces the ranch-wide Google Calendar at `c_5545ea209f164c2ff801f63851bf358a7f85b6115d1162e8a4bcb8db84f391dd@group.calendar.google.com`. If you prefer a different calendar (or multiple calendars), override the `CALENDAR_EMBEDS` list in `instance/config.py` or set the `GOOGLE_CALENDAR_PRIMARY` environment variable.

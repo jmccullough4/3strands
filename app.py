@@ -40,19 +40,12 @@ app.config.setdefault(
     "CALENDAR_EMBEDS",
     [
         {
-            "title": "Production Schedule",
+            "title": "3 Strands Operations",
             "url": os.getenv(
-                "GOOGLE_CALENDAR_PRODUCTION",
-                "https://calendar.google.com/calendar/embed?src=your-production-calendar@group.calendar.google.com",
+                "GOOGLE_CALENDAR_PRIMARY",
+                "https://calendar.google.com/calendar/embed?src=c_5545ea209f164c2ff801f63851bf358a7f85b6115d1162e8a4bcb8db84f391dd@group.calendar.google.com",
             ),
-        },
-        {
-            "title": "Markets & Deliveries",
-            "url": os.getenv(
-                "GOOGLE_CALENDAR_DELIVERIES",
-                "https://calendar.google.com/calendar/embed?src=your-logistics-calendar@group.calendar.google.com",
-            ),
-        },
+        }
     ],
 )
 
@@ -852,4 +845,4 @@ def delete_task_list(list_id: int):
 
 if __name__ == "__main__":
     init_db()
-    app.run(host="0.0.0.0", port=8081, debug=True)
+    app.run(host="127.0.0.1", port=8081, debug=True)
