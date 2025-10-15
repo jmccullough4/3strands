@@ -5,15 +5,40 @@ body {
   min-height: 100vh;
 }
 
+
 .navbar {
   min-height: 72px;
   background: linear-gradient(135deg, rgba(20, 28, 34, 0.95), rgba(35, 52, 43, 0.9));
+}
+
+.nav-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.nav-left,
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.nav-left {
+  justify-content: flex-start;
+}
+
+.nav-right {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .navbar-title {
   color: #f5d97d;
   letter-spacing: 0.18rem;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  text-align: center;
 }
 
 .letter-spacing-1 {
@@ -23,7 +48,7 @@ body {
 .navbar-logo {
   display: flex;
   align-items: center;
-  padding-right: 0.75rem;
+  justify-content: flex-end;
 }
 
 .navbar-logo img {
@@ -31,23 +56,22 @@ body {
   width: auto;
 }
 
-.navbar-nav .nav-link {
+.btn-dashboard {
+  border: 1px solid rgba(245, 217, 125, 0.55);
   color: #f5d97d;
-  font-weight: 600;
+  background: rgba(12, 20, 28, 0.2);
+  text-transform: uppercase;
   letter-spacing: 0.08rem;
+  font-weight: 600;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
 }
 
-.navbar-nav .nav-link:hover,
-.navbar-nav .nav-link:focus {
+.btn-dashboard:hover,
+.btn-dashboard:focus {
   color: #fff1b5;
-}
-
-.navbar-toggler {
-  border-color: rgba(245, 217, 125, 0.6);
-}
-
-.navbar-toggler-icon {
-  filter: invert(92%);
+  border-color: rgba(245, 217, 125, 0.8);
+  background: rgba(245, 217, 125, 0.12);
 }
 
 .nav-avatar-btn {
@@ -145,23 +169,18 @@ a:hover {
 }
 
 @media (max-width: 991.98px) {
+  .nav-grid {
+    grid-template-columns: 1fr;
+    row-gap: 0.75rem;
+  }
+
+  .nav-left,
+  .nav-right {
+    justify-content: center;
+  }
+
   .navbar-title {
-    position: static;
-    transform: none;
-    text-align: center;
-    display: block;
-    margin: 0.5rem auto 0;
-  }
-
-  .navbar .container-fluid {
-    padding-right: 1rem;
-  }
-
-  .navbar-logo {
-    position: static;
-    transform: none;
-    justify-content: flex-end;
-    margin-left: auto;
+    margin: 0;
   }
 
   .nav-avatar-btn {

@@ -8,56 +8,37 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
   </head>
   <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-warning-subtle sticky-top shadow-sm">
-      <div class="container-fluid position-relative py-2">
-        <div class="d-flex align-items-center w-100">
-          <div class="d-flex align-items-center gap-3">
-            <button class="navbar-toggler d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
-              <span class="navbar-toggler-icon"></span>
-            </button>
-            <ul class="navbar-nav d-none d-lg-flex align-items-center gap-3 text-uppercase small mb-0">
-              {% if session.get('username') %}
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('tasks_board') }}">Task board</a></li>
-              {% endif %}
-            </ul>
-          </div>
-          <a class="navbar-title text-uppercase fw-semibold letter-spacing-1 text-decoration-none mx-auto text-center" href="{{ url_for('dashboard') }}">3 Strands Cattle Co.</a>
-          <div class="d-flex align-items-center gap-3 ms-auto">
-            <div class="navbar-logo">
-              <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo" class="rounded shadow-sm">
-            </div>
-            {% if session.get('username') %}
-              <div class="dropdown">
-                <button class="nav-avatar-btn dropdown-toggle" type="button" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account options">
-                  {{ (session.get('user_initial') or session.get('username', '')[:1]) | upper }}
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark shadow" aria-labelledby="userMenu">
-                  <li><h6 class="dropdown-header">{{ session.get('username') }}</h6></li>
-                  <li><a class="dropdown-item" href="{{ url_for('dashboard') }}">Dashboard</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('tasks_board') }}">Task board</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change password</a></li>
-                  {% if session.get('is_admin') %}
-                    <li><a class="dropdown-item" href="{{ url_for('manage_users') }}">User management</a></li>
-                  {% endif %}
-                  <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign out</a></li>
-                </ul>
-              </div>
-            {% else %}
-              <a class="btn btn-outline-straw text-uppercase small" href="{{ url_for('login') }}">Sign in</a>
-            {% endif %}
-          </div>
+    <nav class="navbar navbar-dark bg-dark border-bottom border-warning-subtle sticky-top shadow-sm">
+      <div class="container-fluid nav-grid py-2">
+        <div class="nav-left">
+          <a class="btn btn-dashboard" href="{{ url_for('dashboard') if session.get('username') else url_for('login') }}" aria-label="Back to dashboard">
+            Dashboard
+          </a>
         </div>
-        <div class="collapse navbar-collapse d-lg-none mt-3" id="mainNav">
-          <ul class="navbar-nav text-uppercase small gap-2">
-            {% if session.get('username') %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('tasks_board') }}">Task board</a></li>
-            {% else %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Sign in</a></li>
-            {% endif %}
-          </ul>
+        <a class="navbar-title text-uppercase fw-semibold letter-spacing-1 text-decoration-none" href="{{ url_for('dashboard') if session.get('username') else url_for('login') }}">3 Strands Cattle Co.</a>
+        <div class="nav-right">
+          {% if session.get('username') %}
+            <div class="dropdown">
+              <button class="nav-avatar-btn" type="button" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account options">
+                {{ (session.get('user_initial') or session.get('username', '')[:1]) | upper }}
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark shadow" aria-labelledby="userMenu">
+                <li><h6 class="dropdown-header">{{ session.get('username') }}</h6></li>
+                <li><a class="dropdown-item" href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('tasks_board') }}">Task board</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('file_share') }}">File share</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change password</a></li>
+                {% if session.get('is_admin') %}
+                  <li><a class="dropdown-item" href="{{ url_for('manage_users') }}">User management</a></li>
+                {% endif %}
+                <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign out</a></li>
+              </ul>
+            </div>
+          {% endif %}
+          <div class="navbar-logo">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo" class="rounded shadow-sm">
+          </div>
         </div>
       </div>
     </nav>
