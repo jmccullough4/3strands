@@ -43,7 +43,7 @@ app.config.setdefault(
             "title": "3 Strands Operations",
             "url": os.getenv(
                 "GOOGLE_CALENDAR_PRIMARY",
-                "https://calendar.google.com/calendar/embed?src=c_5545ea209f164c2ff801f63851bf358a7f85b6115d1162e8a4bcb8db84f391dd@group.calendar.google.com",
+                "https://calendar.google.com/calendar/u/0?cid=Y181NTQ1ZWEyMDlmMTY0YzJmZjgwMWY2Mzg1MWJmMzU4YTdmODViNjExNWQxMTYyZThhNGJjYjhkYjg0ZjM5MWRkQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20",
             ),
         }
     ],
@@ -845,4 +845,4 @@ def delete_task_list(list_id: int):
 
 if __name__ == "__main__":
     init_db()
-    app.run(host="127.0.0.1", port=8081, debug=True)
+    app.run(host="0.0.0.0", port=8081, debug=True)

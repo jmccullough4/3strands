@@ -16,4 +16,4 @@ The server listens on port `8081` by default. Uploads are stored in the `uploads
 
 ### Updating the calendars
 
-By default the dashboard surfaces the ranch-wide Google Calendar at `c_5545ea209f164c2ff801f63851bf358a7f85b6115d1162e8a4bcb8db84f391dd@group.calendar.google.com`. If you prefer a different calendar (or multiple calendars), override the `CALENDAR_EMBEDS` list in `instance/config.py` or set the `GOOGLE_CALENDAR_PRIMARY` environment variable.
+By default the dashboard surfaces the ranch-wide Google Calendar shared at `https://calendar.google.com/calendar/u/0?cid=Y181NTQ1ZWEyMDlmMTY0YzJmZjgwMWY2Mzg1MWJmMzU4YTdmODViNjExNWQxMTYyZThhNGJjYjhkYjg0ZjM5MWRkQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20`. If you prefer a different calendar (or multiple calendars), override the `CALENDAR_EMBEDS` list in `instance/config.py` or set the `GOOGLE_CALENDAR_PRIMARY` environment variable.
