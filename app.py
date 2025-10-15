@@ -7,11 +7,11 @@ from typing import Dict, Iterable, Optional
 from urllib.parse import urlparse
 from uuid import uuid4
 
-import requests
 from flask import (
     Flask,
     abort,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -19,7 +19,6 @@ from flask import (
     session,
     url_for,
 )
-from google_auth_oauthlib.flow import Flow
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -40,26 +39,44 @@ app.config.from_mapping(
 )
 app.config.from_pyfile("config.py", silent=True)
 
-GOOGLE_OAUTH_SCOPES = (
-    "openid",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-)
-GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
-
-app.config.setdefault("GOOGLE_CLIENT_ID", os.getenv("GOOGLE_CLIENT_ID", ""))
-app.config.setdefault("GOOGLE_CLIENT_SECRET", os.getenv("GOOGLE_CLIENT_SECRET", ""))
-app.config.setdefault("GOOGLE_APPS_DOMAIN", os.getenv("GOOGLE_APPS_DOMAIN", ""))
 app.config.setdefault(
     "EXTERNAL_BASE_URL",
     os.getenv("EXTERNAL_BASE_URL") or "http://dashboard.3strands.co:8081",
 )
 app.config.setdefault(
-    "ALLOW_INSECURE_GOOGLE_REDIRECTS",
-    os.getenv("ALLOW_INSECURE_GOOGLE_REDIRECTS", "").lower()
+    "ALLOW_INSECURE_SAML_REDIRECTS",
+    os.getenv("ALLOW_INSECURE_SAML_REDIRECTS", "").lower()
     in {"1", "true", "yes", "on"}
     or bool(app.config["EXTERNAL_BASE_URL"].startswith("http://")),
 )
+app.config.setdefault(
+    "SAML_IDP_ENTITY_ID",
+    os.getenv("SAML_IDP_ENTITY_ID")
+    or "https://accounts.google.com/o/saml2?idpid=C040clheo",
+)
+app.config.setdefault(
+    "SAML_IDP_SSO_URL",
+    os.getenv("SAML_IDP_SSO_URL")
+    or "https://accounts.google.com/o/saml2/idp?idpid=C040clheo",
+)
+app.config.setdefault(
+    "SAML_IDP_X509CERT",
+    os.getenv("SAML_IDP_X509CERT")
+    or (
+        "MIIDdDCCAlygAwIBAgIGAZnp2SLbMA0GCSqGSIb3DQEBCwUAMHsxFDASBgNVBAoTC0dvb2dsZSBJbmMuMRYwFAYDVQQHEw1Nb3VudGFpbiBW"
+        "aWV3MQ8wDQYDVQQDEwZHb29nbGUxGDAWBgNVBAsTD0dvb2dsZSBGb3IgV29yazELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWEw"
+        "HhcNMjUxMDE1MjE0OTA1WhcNMzAxMDE0MjE0OTA1WjB7MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEP"
+        "MA0GA1UEAxMGR29vZ2xlMRgwFgYDVQQLEw9Hb29nbGUgRm9yIFdvcmsxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMIIBIjAN"
+        "BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx0zhfINES7iJ0gnEsKfSikxNwfQ6ltqFlcX8CPFrDnLORh1aP+un05Djx513Qhkqss+CwJJYH"
+        "+HYmdHOhoy3HsFMUt6Hj06C/v2dFLzIrhuY9ASzyr75TzAWUztTFWOwtyde1cfQlT+3obzJp1bQcWd7ok0HCOjRProbX61hSDM/uMGuqDUIUS"
+        "isctqP40NKYEn3XAu9k98C7dQIJEnlFBSR/OpNUIUAv1ORvjf+fRIlsXIo/TUndmyfp9oul1VvKWGh1F2A1+Ih3jQGTGxUAlNAUT4MnM2/Ew+"
+        "gEPummJE4u6GSzqijUT1+3ZJKCEdSn4cnriq9N+z7zebj4aSjBwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCosOuC9TX2XqwrPepEzZEiGlE/"
+        "kgq7feBOmefyj0voomj5VxKVyKWKtk0E/qd2ReN7eDZjrTKAuJof9YFcJqS7SeSl/XAW+KwhBvzdX8DN9T+A2Syg/p8tmSB64GWPF4HriHn6g"
+        "p/5SnYaAfeX7amADBTzmRbDd6cX8HRryK3Zt+VCGk05vbq+noHVV3WkY7Kxl1+MRMfCBZv3o5Sr3JvlhfVfFd0ccRtvpAepSsC9lkICDiCxde"
+        "3tkfG28byooNDYX3eyVy0Q1Ujg/yv/+OarchN058SLsXk3H9Zg/2FjEpe26qZu0jKTEPFK95/VYI4LCZ4gkVj/VDJG7RDHD8Cu"
+    ),
+)
+app.config.setdefault("SAML_SP_ENTITY_ID", os.getenv("SAML_SP_ENTITY_ID", ""))
 app.config.setdefault(
     "CALENDAR_EMBEDS",
     [
@@ -85,17 +102,16 @@ def slugify(value: str) -> str:
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
     slug = "-".join(filter(None, slug.split("-")))
     return slug or "list"
-
-
-def _require_google_oauth_ready() -> None:
-    if not app.config.get("GOOGLE_CLIENT_ID") or not app.config.get("GOOGLE_CLIENT_SECRET"):
-        raise RuntimeError(
-            "Google OAuth client credentials are not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."
-        )
+try:  # pragma: no cover - optional dependency checked at runtime
+    from onelogin.saml2.auth import OneLogin_Saml2_Auth
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+except ImportError:  # pragma: no cover - handled at runtime when SAML is used
+    OneLogin_Saml2_Auth = None
+    OneLogin_Saml2_Settings = None
 
 
 def _assert_public_https(parsed_url, context: str) -> None:
-    allow_insecure = app.config.get("ALLOW_INSECURE_GOOGLE_REDIRECTS", False)
+    allow_insecure = app.config.get("ALLOW_INSECURE_SAML_REDIRECTS", False)
     if allow_insecure:
         return
 
@@ -124,39 +140,102 @@ def _assert_public_https(parsed_url, context: str) -> None:
         )
 
 
-def _external_url(endpoint: str) -> str:
-    path = url_for(endpoint, _external=False)
+def _saml_enabled() -> bool:
+    return bool(
+        OneLogin_Saml2_Auth
+        and app.config.get("SAML_IDP_ENTITY_ID")
+        and app.config.get("SAML_IDP_SSO_URL")
+        and app.config.get("SAML_IDP_X509CERT")
+    )
+
+
+def _require_saml_ready() -> None:
+    if OneLogin_Saml2_Auth is None or OneLogin_Saml2_Settings is None:
+        raise RuntimeError(
+            "SAML login requires the python3-saml package. Install it with 'pip install python3-saml'."
+        )
+    if not _saml_enabled():
+        raise RuntimeError(
+            "SAML identity provider details are missing. Update SAML_IDP_* settings in instance/config.py."
+        )
+
+
+def _saml_base_url() -> str:
     base_url = app.config.get("EXTERNAL_BASE_URL")
-    if base_url:
-        parsed_base = urlparse(base_url)
-        if not parsed_base.scheme or not parsed_base.netloc:
-            raise RuntimeError(
-                "EXTERNAL_BASE_URL must include scheme and host, e.g. https://dashboard.example.com"
-            )
-        _assert_public_https(parsed_base, "EXTERNAL_BASE_URL")
-        base_url = base_url.rstrip("/")
-        return f"{base_url}{path}"
+    if not base_url:
+        absolute = url_for("home", _external=True)
+        parsed = urlparse(absolute)
+        _assert_public_https(parsed, "Generated redirect URL")
+        return absolute.rstrip("/")
 
-    absolute_url = url_for(endpoint, _external=True)
-    parsed = urlparse(absolute_url)
-    _assert_public_https(parsed, "Generated redirect URL")
-    return absolute_url
+    parsed_base = urlparse(base_url)
+    if not parsed_base.scheme or not parsed_base.netloc:
+        raise RuntimeError(
+            "EXTERNAL_BASE_URL must include scheme and host, e.g. https://dashboard.example.com"
+        )
+    _assert_public_https(parsed_base, "EXTERNAL_BASE_URL")
+    return base_url.rstrip("/")
 
 
-def _build_google_flow(state: Optional[str] = None) -> Flow:
-    _require_google_oauth_ready()
-    client_config = {
-        "web": {
-            "client_id": app.config["GOOGLE_CLIENT_ID"],
-            "client_secret": app.config["GOOGLE_CLIENT_SECRET"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
+def _saml_settings() -> Dict:
+    _require_saml_ready()
+    base_url = _saml_base_url()
+    acs_url = f"{base_url}{url_for('auth_saml_acs', _external=False)}"
+    entity_id = (
+        app.config.get("SAML_SP_ENTITY_ID") or f"{base_url}{url_for('saml_metadata', _external=False)}"
+    )
+    return {
+        "strict": True,
+        "debug": app.debug,
+        "sp": {
+            "entityId": entity_id,
+            "assertionConsumerService": {
+                "url": acs_url,
+                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+            },
+            "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        },
+        "idp": {
+            "entityId": app.config["SAML_IDP_ENTITY_ID"],
+            "singleSignOnService": {
+                "url": app.config["SAML_IDP_SSO_URL"],
+                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+            },
+            "x509cert": "".join(app.config["SAML_IDP_X509CERT"].split()),
+        },
+        "security": {
+            "authnRequestsSigned": False,
+            "logoutRequestSigned": False,
+            "logoutResponseSigned": False,
+            "wantAssertionsSigned": True,
+            "wantMessagesSigned": False,
+            "wantNameId": True,
+            "wantAttributeStatement": False,
+        },
     }
-    redirect_uri = _external_url("auth_google_callback")
-    flow = Flow.from_client_config(client_config, scopes=GOOGLE_OAUTH_SCOPES, state=state)
-    flow.redirect_uri = redirect_uri
-    return flow
+
+
+def _prepare_saml_request_data() -> Dict:
+    data = {
+        "https": "on" if request.scheme == "https" else "off",
+        "http_host": request.host,
+        "server_port": request.environ.get("SERVER_PORT"),
+        "script_name": request.path,
+        "get_data": request.args.copy(),
+        "post_data": request.form.copy(),
+    }
+    if request.query_string:
+        try:
+            data["query_string"] = request.query_string.decode()
+        except Exception:  # pragma: no cover - defensive fallback
+            data["query_string"] = ""
+    return data
+
+
+def _init_saml_auth():
+    settings = _saml_settings()
+    request_data = _prepare_saml_request_data()
+    return OneLogin_Saml2_Auth(request_data, old_settings=settings)
 
 
 def _normalize_email(value: str) -> str:
@@ -602,7 +681,7 @@ def manage_users():
             except sqlite3.IntegrityError:
                 flash("That email address is already authorized.", "warning")
                 return redirect(url_for("manage_users"))
-        flash("Team member authorized. They can now sign in with Google.", "success")
+        flash("Team member authorized. They can now sign in with Google Workspace.", "success")
         return redirect(url_for("manage_users"))
 
     with get_db_connection() as conn:
@@ -682,74 +761,47 @@ def login():
         return redirect(url_for("login"))
     return render_template(
         "auth/login.html",
-        google_ready=bool(app.config.get("GOOGLE_CLIENT_ID") and app.config.get("GOOGLE_CLIENT_SECRET")),
+        saml_ready=_saml_enabled(),
     )
 
 
-@app.route("/auth/google")
-def auth_google():
+@app.route("/auth/saml/login")
+def auth_saml_login():
     try:
-        flow = _build_google_flow()
-    except RuntimeError as exc:
-        flash(str(exc), "danger")
-        return redirect(url_for("login"))
-    extra_params = {
-        "prompt": "select_account",
-        "include_granted_scopes": "true",
-        "access_type": "offline",
-    }
-    hd_param = (app.config.get("GOOGLE_APPS_DOMAIN") or "").strip()
-    if hd_param:
-        extra_params["hd"] = hd_param
-    authorization_url, state = flow.authorization_url(**extra_params)
-    session["google_oauth_state"] = state
-    session["google_code_verifier"] = flow.code_verifier
-    return redirect(authorization_url)
-
-
-@app.route("/auth/google/callback")
-def auth_google_callback():
-    state = session.get("google_oauth_state")
-    incoming_state = request.args.get("state", "")
-    if not state or state != incoming_state:
-        flash("We couldn't verify that sign-in request. Please try again.", "danger")
-        return redirect(url_for("login"))
-
-    try:
-        flow = _build_google_flow(state=state)
+        auth = _init_saml_auth()
     except RuntimeError as exc:
         flash(str(exc), "danger")
         return redirect(url_for("login"))
 
-    code_verifier = session.get("google_code_verifier")
-    if code_verifier:
-        flow.code_verifier = code_verifier
+    return redirect(auth.login())
 
-    try:
-        flow.fetch_token(authorization_response=request.url)
-    except Exception:
-        flash("We couldn't sign you in with Google. Please try again.", "danger")
-        return redirect(url_for("login"))
-    finally:
-        session.pop("google_oauth_state", None)
-        session.pop("google_code_verifier", None)
 
-    credentials = flow.credentials
+@app.route("/auth/saml/acs", methods=["POST"])
+def auth_saml_acs():
     try:
-        response = requests.get(
-            GOOGLE_USERINFO_ENDPOINT,
-            headers={"Authorization": f"Bearer {credentials.token}"},
-            timeout=10,
-        )
-        response.raise_for_status()
-        profile = response.json()
-    except Exception:
-        flash("Unable to load your Google profile.", "danger")
+        auth = _init_saml_auth()
+    except RuntimeError as exc:
+        flash(str(exc), "danger")
         return redirect(url_for("login"))
 
-    email = _normalize_email(profile.get("email", ""))
-    if not email or not profile.get("email_verified", profile.get("verified_email")):
-        flash("Your Google account must have a verified email address.", "danger")
+    auth.process_response()
+    errors = auth.get_errors()
+    if errors:
+        flash(", ".join(errors) or "The identity provider rejected the request.", "danger")
+        return redirect(url_for("login"))
+    if not auth.is_authenticated():
+        flash("We couldn't verify your Google Workspace login.", "danger")
+        return redirect(url_for("login"))
+
+    attributes = auth.get_attributes()
+    nameid = auth.get_nameid() or ""
+    email = _normalize_email(nameid)
+    if not email:
+        email_attrs = attributes.get("email") or attributes.get("Email")
+        if email_attrs:
+            email = _normalize_email(email_attrs[0])
+    if not email:
+        flash("Your Google Workspace identity must include an email address.", "danger")
         return redirect(url_for("login"))
 
     with get_db_connection() as conn:
@@ -761,8 +813,7 @@ def auth_google_callback():
         flash("That email address hasn't been authorized yet. Please ask the admin for access.", "danger")
         return redirect(url_for("login"))
 
-    google_sub = profile.get("sub")
-    full_name = allowed["full_name"] or profile.get("name")
+    full_name = allowed["full_name"] or attributes.get("displayName", [None])[0]
     with get_db_connection() as conn:
         existing = conn.execute(
             "SELECT id, username, full_name, email, phone, is_admin FROM users WHERE email = ?",
@@ -779,7 +830,7 @@ def auth_google_callback():
                 (
                     full_name or existing["full_name"],
                     allowed["phone"],
-                    google_sub,
+                    nameid,
                     email,
                     email,
                     int(allowed["is_admin"]),
@@ -803,7 +854,7 @@ def auth_google_callback():
                     email,
                     allowed["phone"],
                     int(allowed["is_admin"]),
-                    google_sub,
+                    nameid,
                 ),
             )
             conn.commit()
@@ -812,10 +863,29 @@ def auth_google_callback():
                 (cursor.lastrowid,),
             ).fetchone()
 
-    _set_user_session(user, provider="google")
+    _set_user_session(user, provider="saml")
     session["display_name"] = full_name or session.get("display_name")
-    flash("Signed in with Google.", "success")
+    session["saml_nameid"] = nameid
+    session["saml_session_index"] = auth.get_session_index()
+    flash("Signed in with Google Workspace.", "success")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/auth/saml/metadata")
+def saml_metadata():
+    try:
+        settings = OneLogin_Saml2_Settings(_saml_settings(), None)
+    except RuntimeError as exc:
+        return make_response(str(exc), 500)
+
+    metadata = settings.get_sp_metadata()
+    errors = settings.validate_metadata(metadata)
+    if errors:
+        return make_response("; ".join(errors), 500)
+
+    response = make_response(metadata, 200)
+    response.headers["Content-Type"] = "application/samlmetadata+xml"
+    return response
 
 
 @app.route("/logout")

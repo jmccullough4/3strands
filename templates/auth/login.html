@@ -8,14 +8,14 @@
             <h1 class="h4 brand-accent">Welcome back</h1>
             <p class="text-secondary mb-0">Sign in to access the 3 Strands Cattle Co. dashboard.</p>
           </div>
-          {% if google_ready %}
+          {% if saml_ready %}
             <div class="d-grid gap-3 mb-4">
-              <a class="btn btn-google" href="{{ url_for('auth_google') }}">
+              <a class="btn btn-google" href="{{ url_for('auth_saml_login') }}">
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" class="me-2" width="20" height="20">
-                Sign in with Google
+                Sign in with Google Workspace
               </a>
               <div class="text-secondary small text-center">
-                Use any Google account that your admin has authorized under Access Control.
+                Use your work email. Access is granted once an admin adds your address to Access Control.
               </div>
             </div>
           {% endif %}
@@ -30,9 +30,9 @@
             </div>
             <button type="submit" class="btn btn-brand">Sign in as admin</button>
           </form>
-          <div class="mt-4 small text-secondary">
-            Corporate users should authenticate with Google. The admin credential is reserved for maintenance or emergency access.
-          </div>
+            <div class="mt-4 small text-secondary">
+              Corporate users should authenticate with Google Workspace. The admin credential is reserved for maintenance or emergency access.
+            </div>
         </div>
       </div>
     </div>
