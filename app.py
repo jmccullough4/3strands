@@ -456,7 +456,7 @@ def manage_users():
                 flash("Unable to determine which account to update.", "danger")
                 return redirect(url_for("manage_users"))
 
-            password_value = request.form.get("password", "")
+            password_value = request.form.get("password", "").strip()
             with get_db_connection() as conn:
                 try:
                     conn.execute(
@@ -468,6 +468,9 @@ def manage_users():
                         (username, full_name, email, phone, is_admin, int(user_id)),
                     )
                     if password_value:
+                        if len(password_value) < 8:
+                            flash("Passwords must be at least 8 characters when resetting an account.", "warning")
+                            return redirect(url_for("manage_users"))
                         conn.execute(
                             "UPDATE users SET password_hash = ? WHERE id = ?",
                             (generate_password_hash(password_value), int(user_id)),
@@ -483,9 +486,12 @@ def manage_users():
             flash("Account details updated.", "success")
             return redirect(url_for("manage_users"))
 
-        password_value = request.form.get("password", "")
+        password_value = request.form.get("password", "").strip()
         if not password_value:
             flash("Please provide a password for the new account.", "warning")
+            return redirect(url_for("manage_users"))
+        if len(password_value) < 8:
+            flash("Passwords must be at least 8 characters when creating a new account.", "warning")
             return redirect(url_for("manage_users"))
 
         with get_db_connection() as conn:
@@ -527,12 +533,15 @@ def manage_users():
 @login_required
 def change_password():
     if request.method == "POST":
-        current_password = request.form.get("current_password", "")
-        new_password = request.form.get("new_password", "")
-        confirm_password = request.form.get("confirm_password", "")
+        current_password = request.form.get("current_password", "").strip()
+        new_password = request.form.get("new_password", "").strip()
+        confirm_password = request.form.get("confirm_password", "").strip()
 
         if not new_password:
             flash("Please provide a new password.", "warning")
+            return redirect(url_for("change_password"))
+        if len(new_password) < 8:
+            flash("Choose a password that is at least 8 characters long.", "warning")
             return redirect(url_for("change_password"))
         if new_password != confirm_password:
             flash("New password and confirmation do not match.", "danger")
@@ -543,11 +552,21 @@ def change_password():
                 "SELECT password_hash FROM users WHERE id = ?",
                 (session["user_id"],),
             ).fetchone()
-            if not user or not user["password_hash"]:
-                flash("Password authentication is not available for this account.", "danger")
+            if not user:
+                flash("We couldn't load your account. Please sign in again.", "danger")
+                return redirect(url_for("login"))
+
+            stored_hash = user["password_hash"]
+            if stored_hash:
+                if not current_password or not check_password_hash(stored_hash, current_password):
+                    flash("Current password is incorrect.", "danger")
+                    return redirect(url_for("change_password"))
+            elif not session.get("is_admin"):
+                flash("Ask an administrator to set a password for your account first.", "danger")
                 return redirect(url_for("dashboard"))
-            if not check_password_hash(user["password_hash"], current_password):
-                flash("Current password is incorrect.", "danger")
+
+            if stored_hash and check_password_hash(stored_hash, new_password):
+                flash("Your new password must be different from your current password.", "warning")
                 return redirect(url_for("change_password"))
 
             conn.execute(
