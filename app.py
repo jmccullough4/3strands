@@ -3,6 +3,7 @@ import sqlite3
 from functools import wraps
 from pathlib import Path
 from typing import Dict, Iterable, Optional
+from urllib.parse import parse_qs, quote, urlparse
 from uuid import uuid4
 
 from flask import (
@@ -43,17 +44,66 @@ app.config.setdefault(
             "title": "3 Strands Operations",
             "url": os.getenv(
                 "GOOGLE_CALENDAR_PRIMARY",
-                "https://calendar.google.com/calendar/u/0?cid=Y181NTQ1ZWEyMDlmMTY0YzJmZjgwMWY2Mzg1MWJmMzU4YTdmODViNjExNWQxMTYyZThhNGJjYjhkYjg0ZjM5MWRkQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20",
+                "https://calendar.google.com/calendar/ical/c_5545ea209f164c2ff801f63851bf358a7f85b6115d1162e8a4bcb8db84f391dd%40group.calendar.google.com/public/basic.ics",
             ),
         }
     ],
 )
+app.config.setdefault("CALENDAR_TIMEZONE", "America/Chicago")
 
 
 def slugify(value: str) -> str:
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
     slug = "-".join(filter(None, slug.split("-")))
     return slug or "list"
+
+
+def _format_calendar_url(raw_url: str, timezone: str) -> str:
+    if not raw_url:
+        return raw_url
+
+    if "calendar/embed" in raw_url:
+        return raw_url
+
+    if "/calendar/ical/" in raw_url and raw_url.endswith(".ics"):
+        calendar_id_part = raw_url.split("/calendar/ical/", 1)[1]
+        calendar_id = calendar_id_part.split("/public", 1)[0]
+        calendar_id = calendar_id.replace("%40", "@")
+        return (
+            "https://calendar.google.com/calendar/embed?src="
+            f"{quote(calendar_id)}&ctz={quote(timezone)}&mode=AGENDA"
+        )
+
+    parsed = urlparse(raw_url)
+    if parsed.netloc == "calendar.google.com":
+        query = parse_qs(parsed.query)
+        cid_values = query.get("cid")
+        if cid_values:
+            calendar_id = cid_values[0]
+            return (
+                "https://calendar.google.com/calendar/embed?src="
+                f"{quote(calendar_id)}&ctz={quote(timezone)}&mode=AGENDA"
+            )
+
+    return raw_url
+
+
+def _resolve_calendar_embeds() -> Iterable[Dict[str, str]]:
+    timezone = app.config.get("CALENDAR_TIMEZONE", "UTC")
+    resolved = []
+    for calendar in app.config.get("CALENDAR_EMBEDS", []):
+        if not isinstance(calendar, dict):
+            continue
+        url = calendar.get("url", "").strip()
+        if not url:
+            continue
+        resolved.append(
+            {
+                "title": calendar.get("title") or "Calendar",
+                "url": _format_calendar_url(url, timezone),
+            }
+        )
+    return resolved
 
 
 def _ensure_unique_list_slug(conn: sqlite3.Connection, base: str) -> str:
@@ -306,7 +356,7 @@ def dashboard():
         "dashboard/index.html",
         recent_files=recent_files,
         task_summary=task_summary,
-        calendar_embeds=app.config.get("CALENDAR_EMBEDS", []),
+        calendar_embeds=list(_resolve_calendar_embeds()),
     )
 
 
