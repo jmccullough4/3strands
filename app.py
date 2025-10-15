@@ -207,7 +207,7 @@ def init_db():
         if "phone" not in existing_user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         if "google_sub" not in existing_user_columns:
-            conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT UNIQUE")
+            conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
         conn.commit()
 
         existing_tasks_columns = {
