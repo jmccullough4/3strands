@@ -129,6 +129,7 @@ def _set_user_session(user: sqlite3.Row, provider: str) -> None:
     session["auth_provider"] = provider
 def init_db():
     with sqlite3.connect(DATABASE) as conn:
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
