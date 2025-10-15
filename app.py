@@ -47,6 +47,7 @@ GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
 app.config.setdefault("GOOGLE_CLIENT_ID", os.getenv("GOOGLE_CLIENT_ID", ""))
 app.config.setdefault("GOOGLE_CLIENT_SECRET", os.getenv("GOOGLE_CLIENT_SECRET", ""))
 app.config.setdefault("GOOGLE_APPS_DOMAIN", os.getenv("GOOGLE_APPS_DOMAIN", "3strands.co"))
+app.config.setdefault("EXTERNAL_BASE_URL", os.getenv("EXTERNAL_BASE_URL"))
 app.config.setdefault(
     "CALENDAR_EMBEDS",
     [
@@ -81,6 +82,14 @@ def _require_google_oauth_ready() -> None:
         )
 
 
+def _external_url(endpoint: str) -> str:
+    base_url = app.config.get("EXTERNAL_BASE_URL")
+    if base_url:
+        base_url = base_url.rstrip("/")
+        return f"{base_url}{url_for(endpoint, _external=False)}"
+    return url_for(endpoint, _external=True)
+
+
 def _build_google_flow(state: Optional[str] = None) -> Flow:
     _require_google_oauth_ready()
     client_config = {
@@ -91,7 +100,7 @@ def _build_google_flow(state: Optional[str] = None) -> Flow:
             "token_uri": "https://oauth2.googleapis.com/token",
         }
     }
-    redirect_uri = url_for("auth_google_callback", _external=True)
+    redirect_uri = _external_url("auth_google_callback")
     flow = Flow.from_client_config(client_config, scopes=GOOGLE_OAUTH_SCOPES, state=state)
     flow.redirect_uri = redirect_uri
     return flow
