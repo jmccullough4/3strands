@@ -1333,4 +1333,6 @@ def delete_task_list(list_id: str):
 
 if __name__ == "__main__":
     init_db()
-    app.run(host="0.0.0.0", port=8081, debug=True)
+    debug_env = os.environ.get("FLASK_DEBUG", "")
+    debug_mode = debug_env.lower() in {"1", "true", "t", "yes", "on"}
+    app.run(host="0.0.0.0", port=8081, debug=debug_mode)
