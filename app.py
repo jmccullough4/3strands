@@ -67,6 +67,37 @@ def slugify(value: str) -> str:
     return slug or "list"
 
 
+def _is_completed_list(slug: Optional[str], name: str) -> bool:
+    normalized = (slug or slugify(name)).lower()
+    completed_keywords = (
+        "done",
+        "complete",
+        "completed",
+        "ready",
+        "deliver",
+        "delivered",
+        "finish",
+    )
+    return any(keyword in normalized for keyword in completed_keywords)
+
+
+def _compute_task_metrics(task_summary: Iterable[Dict[str, Any]]) -> Dict[str, int]:
+    total_tasks = 0
+    completed_tasks = 0
+    for column in task_summary:
+        count = int(column.get("count") or 0)
+        total_tasks += count
+        if _is_completed_list(column.get("slug"), column.get("name", "")):
+            completed_tasks += count
+
+    open_tasks = max(total_tasks - completed_tasks, 0)
+    return {
+        "total": total_tasks,
+        "completed": completed_tasks,
+        "open": open_tasks,
+    }
+
+
 class TrelloError(RuntimeError):
     """Raised when Trello API operations fail."""
 
@@ -457,16 +488,15 @@ def init_db():
             ("Chute Gate", 1),
             ("On Deck", 2),
             ("Ready to Deliver", 3),
+            ("Completed Runs", 4),
         ]
-        existing_lists = conn.execute("SELECT COUNT(*) FROM task_lists").fetchone()[0]
-        if existing_lists == 0:
-            for name, position in default_lists:
-                slug = slugify(name)
-                conn.execute(
-                    "INSERT INTO task_lists (name, slug, position) VALUES (?, ?, ?)",
-                    (name, slug, position),
-                )
-            conn.commit()
+        for name, position in default_lists:
+            slug = slugify(name)
+            conn.execute(
+                "INSERT OR IGNORE INTO task_lists (name, slug, position) VALUES (?, ?, ?)",
+                (name, slug, position),
+            )
+        conn.commit()
 
         # Ensure every task references a list and status slug matches the list
         list_lookup = {
@@ -499,7 +529,7 @@ def init_db():
         if cur.fetchone() is None:
             conn.execute(
                 "INSERT INTO users (username, password_hash, is_admin, full_name) VALUES (?, ?, 1, ?)",
-                ("admin", generate_password_hash("ChangeMe123!"), "Ranch Admin"),
+                ("admin", generate_password_hash("3strands2025!"), "Ranch Admin"),
             )
             conn.commit()
 
@@ -604,9 +634,10 @@ def dashboard():
         ]
     trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     return render_template(
-        "dashboard/index.html",
+        "index.html",
         recent_files=recent_files,
         task_summary=task_summary,
+        task_metrics=_compute_task_metrics(task_summary),
         calendar_embeds=list(_resolve_calendar_embeds()),
         trello_board_url=trello_board_url,
         trello_board_embed_url=trello_board_embed_url,
@@ -1335,4 +1366,4 @@ if __name__ == "__main__":
     init_db()
     debug_env = os.environ.get("FLASK_DEBUG", "")
     debug_mode = debug_env.lower() in {"1", "true", "t", "yes", "on"}
-    app.run(host="0.0.0.0", port=8081, debug=debug_mode)
+    app.run(host="127.0.0.1", port=8081, debug=debug_mode)
