@@ -1,7 +1,7 @@
 {% extends 'layouts/base.html' %}
 {% block content %}
   <div class="row g-4 mb-4">
-    <div class="col-xl-5">
+    <div class="col-xl-6">
       <div class="card h-100">
         <div class="card-body d-flex flex-column gap-3">
           <div>
@@ -25,10 +25,22 @@
                 {% endfor %}
               </select>
             </div>
+            <div>
+              <label for="assigned_to" class="form-label">Assign to</label>
+              <select class="form-select" id="assigned_to" name="assigned_to">
+                <option value="">Unassigned</option>
+                {% for member in assignable_users %}
+                  <option value="{{ member['id'] }}">{{ member['display_name'] }}</option>
+                {% endfor %}
+              </select>
+              {% if not assignable_users %}
+                <div class="form-text text-secondary">Invite team members from the Admin area to assign tasks.</div>
+              {% endif %}
+            </div>
             <button type="submit" class="btn btn-brand">Add to Board</button>
           </form>
           <div class="small text-secondary">
-            Tip: Everyone can move tasks between lists as work progresses. Use the details field to track contacts, timings, and key notes.
+            Tip: Everyone can move tasks between lists as work progresses. Use the assignment picker so crew members know what is expected.
           </div>
           <form method="post" action="{{ url_for('create_task_list') }}" class="d-grid gap-2 mt-4">
             <div>
@@ -40,19 +52,15 @@
         </div>
       </div>
     </div>
-    <div class="col-xl-7">
+    <div class="col-xl-6">
       <div class="card h-100 cooler-placeholder">
         <div class="card-body d-flex flex-column gap-3">
-          <h2 class="h5 brand-accent mb-1">File Share &amp; Cooler Logs</h2>
-          <p class="text-secondary mb-0">Need a spec sheet or compliance checklist while planning tasks? Hop over to the shared drive or keep an eye on the cooler log placeholder until sensors come online.</p>
-          <div class="d-flex flex-wrap gap-2">
-            <a class="btn btn-outline-straw" href="{{ url_for('file_share') }}">Go to File Share</a>
-            <a class="btn btn-outline-straw" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
-          </div>
+          <h2 class="h5 brand-accent mb-1">Board Quick Reference</h2>
+          <p class="text-secondary mb-0">Use the lists below to visualize workflow from chute to delivery. Drag cards between stages after stand-up or during market prep.</p>
           <ul class="small text-secondary mb-0 ps-3">
-            <li>Upcoming: live cooler temperature tiles right beside this board.</li>
-            <li>Use tasks to assign morning feedings or delivery runs.</li>
-            <li>Drop links to recipes or marketing collateral from the file share.</li>
+            <li>Assign each task to a hands-on teammate so responsibilities are clear.</li>
+            <li>Drop delivery routes, vet contacts, or ministry follow-up notes in the details field.</li>
+            <li>Need crew members? Create them from the Admin tools and they will appear here automatically.</li>
           </ul>
         </div>
       </div>
@@ -99,6 +107,13 @@
                         <span>Logged by {{ task['creator'] or 'team member' }}</span>
                         <span>{{ task['created_at'] or '' }}</span>
                       </div>
+                      <div class="small text-secondary fw-semibold">
+                        {% if task['assignee'] %}
+                          Assigned to {{ task['assignee'] }}
+                        {% else %}
+                          Unassigned
+                        {% endif %}
+                      </div>
                       <div class="d-flex flex-wrap gap-2">
                         {% for option in task_lists %}
                           {% if option['id'] != task_list['id'] %}
@@ -122,6 +137,15 @@
                           <div>
                             <label class="form-label small" for="description-{{ task['id'] }}">Details</label>
                             <textarea class="form-control form-control-sm" id="description-{{ task['id'] }}" name="description" rows="3">{{ task['description'] or '' }}</textarea>
+                          </div>
+                          <div>
+                            <label class="form-label small" for="assigned-to-{{ task['id'] }}">Assign to</label>
+                            <select class="form-select form-select-sm" id="assigned-to-{{ task['id'] }}" name="assigned_to">
+                              <option value="" {% if not task['assigned_to'] %}selected{% endif %}>Unassigned</option>
+                              {% for member in assignable_users %}
+                                <option value="{{ member['id'] }}" {% if task['assigned_to'] == member['id'] %}selected{% endif %}>{{ member['display_name'] }}</option>
+                              {% endfor %}
+                            </select>
                           </div>
                           <div class="text-end">
                             <button class="btn btn-sm btn-brand" type="submit">Save changes</button>

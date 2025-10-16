@@ -211,9 +211,11 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'todo',
                 position INTEGER NOT NULL DEFAULT 0,
                 created_by INTEGER,
+                assigned_to INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 list_id INTEGER,
                 FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE SET NULL
             )
             """
@@ -240,6 +242,8 @@ def init_db():
         }
         if "list_id" not in existing_tasks_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN list_id INTEGER")
+        if "assigned_to" not in existing_tasks_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN assigned_to INTEGER")
         conn.commit()
 
         existing_indexes = {
@@ -700,12 +704,28 @@ def tasks_board():
         )
         tasks = conn.execute(
             """
-            SELECT tasks.id, tasks.title, tasks.description, tasks.created_at,
-                   tasks.position, tasks.list_id,
-                   COALESCE(NULLIF(users.full_name, ''), users.username) AS creator
+            SELECT tasks.id,
+                   tasks.title,
+                   tasks.description,
+                   tasks.created_at,
+                   tasks.position,
+                   tasks.list_id,
+                   tasks.assigned_to,
+                   COALESCE(NULLIF(creator.full_name, ''), creator.username) AS creator,
+                   COALESCE(NULLIF(assignee.full_name, ''), assignee.username) AS assignee
             FROM tasks
-            LEFT JOIN users ON tasks.created_by = users.id
+            LEFT JOIN users AS creator ON tasks.created_by = creator.id
+            LEFT JOIN users AS assignee ON tasks.assigned_to = assignee.id
             ORDER BY tasks.list_id, tasks.position, tasks.created_at
+            """
+        ).fetchall()
+        assignable_users = conn.execute(
+            """
+            SELECT id,
+                   COALESCE(NULLIF(full_name, ''), username) AS display_name
+            FROM users
+            WHERE is_admin = 0
+            ORDER BY display_name COLLATE NOCASE, id
             """
         ).fetchall()
     tasks_by_list: Dict[int, list] = {task_list["id"]: [] for task_list in task_lists}
@@ -715,6 +735,7 @@ def tasks_board():
         "dashboard/tasks.html",
         task_lists=task_lists,
         tasks_by_list=tasks_by_list,
+        assignable_users=assignable_users,
     )
 
 
@@ -724,6 +745,7 @@ def create_task():
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
     list_id_raw = request.form.get("list_id", "").strip()
+    assigned_to_raw = request.form.get("assigned_to", "").strip()
 
     if not title:
         flash("Task title is required.", "warning")
@@ -733,6 +755,7 @@ def create_task():
         return redirect(url_for("tasks_board"))
 
     list_id = int(list_id_raw)
+    assigned_to_id: Optional[int] = None
     with get_db_connection() as conn:
         task_list = conn.execute(
             "SELECT id, slug FROM task_lists WHERE id = ?",
@@ -742,14 +765,28 @@ def create_task():
             flash("That task list no longer exists.", "danger")
             return redirect(url_for("tasks_board"))
 
+        if assigned_to_raw:
+            if assigned_to_raw.isdigit():
+                candidate = conn.execute(
+                    "SELECT id FROM users WHERE id = ? AND is_admin = 0",
+                    (int(assigned_to_raw),),
+                ).fetchone()
+                if candidate is None:
+                    flash("Choose a valid team member for this assignment.", "danger")
+                    return redirect(url_for("tasks_board"))
+                assigned_to_id = int(assigned_to_raw)
+            elif assigned_to_raw.lower() not in {"", "none", "null"}:
+                flash("Choose a valid team member for this assignment.", "danger")
+                return redirect(url_for("tasks_board"))
+
         current_position = conn.execute(
             "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE list_id = ?",
             (list_id,),
         ).fetchone()[0]
         conn.execute(
             """
-            INSERT INTO tasks (title, description, status, position, created_by, list_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tasks (title, description, status, position, created_by, assigned_to, list_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 title,
@@ -757,6 +794,7 @@ def create_task():
                 task_list["slug"],
                 current_position + 1,
                 session.get("user_id"),
+                assigned_to_id,
                 list_id,
             ),
         )
@@ -806,15 +844,31 @@ def move_task(task_id: str):
 def update_task(task_id: str):
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
+    assigned_to_raw = request.form.get("assigned_to", "").strip()
 
     if not title:
         flash("Task title cannot be empty.", "warning")
         return redirect(url_for("tasks_board"))
 
+    assigned_to_id: Optional[int] = None
     with get_db_connection() as conn:
+        if assigned_to_raw:
+            if assigned_to_raw.isdigit():
+                candidate = conn.execute(
+                    "SELECT id FROM users WHERE id = ? AND is_admin = 0",
+                    (int(assigned_to_raw),),
+                ).fetchone()
+                if candidate is None:
+                    flash("Choose a valid team member for this assignment.", "danger")
+                    return redirect(url_for("tasks_board"))
+                assigned_to_id = int(assigned_to_raw)
+            elif assigned_to_raw.lower() not in {"", "none", "null"}:
+                flash("Choose a valid team member for this assignment.", "danger")
+                return redirect(url_for("tasks_board"))
+
         cursor = conn.execute(
-            "UPDATE tasks SET title = ?, description = ? WHERE id = ?",
-            (title, description or None, int(task_id)),
+            "UPDATE tasks SET title = ?, description = ?, assigned_to = ? WHERE id = ?",
+            (title, description or None, assigned_to_id, int(task_id)),
         )
         conn.commit()
 

@@ -24,9 +24,6 @@
             <a class="btn btn-dashboard" href="{{ url_for('dashboard') }}" aria-label="Back to dashboard">
               Dashboard
             </a>
-            <a class="btn btn-outline-straw d-none d-md-inline-flex" href="{{ url_for('tasks_board') }}">
-              Task Board
-            </a>
             <div class="dropdown">
               <button class="nav-avatar-btn" type="button" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account options">
                 {{ (session.get('user_initial') or session.get('username', '')[:1]) | upper }}
