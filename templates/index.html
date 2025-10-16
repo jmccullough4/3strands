@@ -41,6 +41,42 @@
     </div>
   </div>
 
+  <div class="row g-4 mb-4">
+    <div class="col-md-4">
+      <div class="card metric-card h-100">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase small mb-1">Total Tasks</p>
+          <div class="display-6 fw-bold text-light">{{ task_metrics.total }}</div>
+          <p class="text-secondary mb-0">All assignments across every list.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card metric-card h-100">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase small mb-1">In Progress</p>
+          <div class="display-6 fw-bold text-warning">{{ task_metrics.open }}</div>
+          <p class="text-secondary mb-0">Cards that still need attention.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card metric-card h-100">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase small mb-1">Completed</p>
+          <div class="display-6 fw-bold text-success">{{ task_metrics.completed }}</div>
+          <p class="text-secondary mb-0">
+            {% if task_metrics.total %}
+              {{ ((task_metrics.completed / task_metrics.total) * 100) | round(0, 'floor') }}% complete across the board.
+            {% else %}
+              Move a card to "Ready" or "Completed" to start tracking wins.
+            {% endif %}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="row g-4">
     <div class="col-lg-4">
       <div class="card h-100">
