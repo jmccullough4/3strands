@@ -215,10 +215,32 @@ class TrelloClient:
         self._request("PUT", f"/lists/{list_id}/closed", params={"value": "true"})
 
 
+def _extract_trello_board_id(board_url: Optional[str]) -> Optional[str]:
+    if not board_url:
+        return None
+
+    parsed = urlparse(board_url)
+    if parsed.netloc != "trello.com":
+        return None
+
+    path_parts = [segment for segment in parsed.path.split("/") if segment]
+    if len(path_parts) >= 2 and path_parts[0] == "b":
+        return path_parts[1]
+
+    return None
+
+
 def get_trello_client() -> Optional[TrelloClient]:
     api_key = app.config.get("TRELLO_API_KEY")
     token = app.config.get("TRELLO_API_TOKEN")
     board_id = app.config.get("TRELLO_BOARD_ID")
+
+    if not board_id:
+        derived = _extract_trello_board_id(app.config.get("TRELLO_BOARD_URL"))
+        if derived:
+            board_id = derived
+            app.config["TRELLO_BOARD_ID"] = derived
+
     if api_key and token and board_id:
         return TrelloClient(api_key, token, board_id)
     return None

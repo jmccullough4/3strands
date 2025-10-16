@@ -25,9 +25,10 @@ The shared task board can mirror a Trello workspace so everyone collaborates fro
 ```python
 TRELLO_API_KEY = "your-trello-api-key"
 TRELLO_API_TOKEN = "your-trello-api-token"
+# optional when `TRELLO_BOARD_URL` is set to a standard Trello link
 TRELLO_BOARD_ID = "the-board-id-or-shortlink"
 ```
 
-You can generate an API key and token from [trello.com/app-key](https://trello.com/app-key). Once configured, cards, list updates, and deletions in the dashboard are performed directly against the Trello board, and every refresh pulls the latest lists and cards.
+You can generate an API key and token from [trello.com/app-key](https://trello.com/app-key). Once configured, cards, list updates, and deletions in the dashboard are performed directly against the Trello board, and every refresh pulls the latest lists and cards. If you omit `TRELLO_BOARD_ID`, the app derives it automatically from the configured `TRELLO_BOARD_URL` when possible.
 
 The dashboard also embeds the shared board so teammates can review it at a glance. By default it points to `https://trello.com/b/WLeHBhSM/3-iii`; override `TRELLO_BOARD_URL` in `instance/config.py` (or via an environment variable of the same name) if you need a different workspace. Without API credentials the embed still renders, but card edits must happen directly inside Trello.
