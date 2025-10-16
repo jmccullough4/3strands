@@ -1,0 +1,149 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+  <div class="row g-4 mb-4">
+    <div class="col-xl-5">
+      <div class="card h-100">
+        <div class="card-body d-flex flex-column gap-3">
+          <div>
+            <h1 class="h4 brand-accent mb-2">Shared Task Board</h1>
+            <p class="text-secondary mb-0">Coordinate livestock care, deliveries, farmers market prep, and cooler upkeep so every cut reaches the table with excellence.</p>
+          </div>
+          {% if trello_enabled %}
+            <div class="alert alert-warning bg-dark border-warning text-warning mb-0" role="alert">
+              Live with Trello &mdash; cards, lists, and updates sync instantly with the shared board.
+            </div>
+          {% endif %}
+          <form method="post" action="{{ url_for('create_task') }}" class="d-grid gap-3">
+            <div>
+              <label for="title" class="form-label">Task title</label>
+              <input type="text" class="form-control" id="title" name="title" placeholder="Schedule beef processing pickup" required>
+            </div>
+            <div>
+              <label for="description" class="form-label">Details</label>
+              <textarea class="form-control" id="description" name="description" rows="3" placeholder="Include cut sheet deadlines, processor contacts, or market notes."></textarea>
+            </div>
+            <div>
+              <label for="list_id" class="form-label">Start in list</label>
+              <select class="form-select" id="list_id" name="list_id">
+                {% for task_list in task_lists %}
+                  <option value="{{ task_list['id'] }}">{{ task_list['name'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <button type="submit" class="btn btn-brand">Add to Board</button>
+          </form>
+          <div class="small text-secondary">
+            Tip: Everyone can move tasks between lists as work progresses. Use the details field to track delivery stops, feed schedules, or cooler maintenance notes.
+          </div>
+          <form method="post" action="{{ url_for('create_task_list') }}" class="d-grid gap-2 mt-4">
+            <div>
+              <label for="list-name" class="form-label">Add a new list</label>
+              <input type="text" class="form-control" id="list-name" name="name" placeholder="Add 'Butcher Prep' or 'Farmers Market'" required>
+            </div>
+            <button type="submit" class="btn btn-outline-straw">{{ 'Add Trello List' if trello_enabled else 'Create List' }}</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-7">
+      <div class="card h-100 cooler-placeholder">
+        <div class="card-body d-flex flex-column gap-3">
+          <h2 class="h5 brand-accent mb-1">File Share &amp; Cooler Logs</h2>
+          <p class="text-secondary mb-0">Need a spec sheet or compliance checklist while planning tasks? Hop over to the shared drive or keep an eye on the cooler log placeholder until sensors come online.</p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-straw" href="{{ url_for('file_share') }}">Go to File Share</a>
+            <a class="btn btn-outline-straw" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+          </div>
+          <ul class="small text-secondary mb-0 ps-3">
+            <li>Upcoming: live cooler temperature tiles right beside this board.</li>
+            <li>Use tasks to assign morning feedings or delivery runs.</li>
+            <li>Drop links to recipes or marketing collateral from the file share.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 task-board-row">
+    {% for task_list in task_lists %}
+      <div class="col-lg-4">
+        <div class="task-column h-100">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h5 mb-0 text-uppercase letter-spacing-1">{{ task_list['name'] }}</h2>
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge rounded-pill text-bg-warning text-dark">{{ tasks_by_list.get(task_list['id'], [])|length }}</span>
+              <button class="btn btn-sm btn-outline-straw" type="button" data-bs-toggle="collapse" data-bs-target="#list-actions-{{ task_list['id'] }}" aria-expanded="false" aria-controls="list-actions-{{ task_list['id'] }}">Manage</button>
+            </div>
+          </div>
+          <div class="collapse mb-3" id="list-actions-{{ task_list['id'] }}">
+            <form method="post" action="{{ url_for('rename_task_list', list_id=task_list['id']) }}" class="d-grid gap-2 mb-2">
+              <label class="form-label small" for="rename-{{ task_list['id'] }}">Rename list</label>
+              <div class="input-group input-group-sm">
+                <input type="text" class="form-control" id="rename-{{ task_list['id'] }}" name="name" value="{{ task_list['name'] }}" required>
+                <button class="btn btn-outline-warning" type="submit">Save</button>
+              </div>
+            </form>
+            {% set confirm_message = 'Archive this Trello list?' if trello_enabled else 'Remove this list? Tasks must be moved first.' %}
+            <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('{{ confirm_message }}');">
+              <button class="btn btn-sm btn-outline-danger w-100" type="submit">{{ 'Archive list' if trello_enabled else 'Delete list' }}</button>
+            </form>
+          </div>
+          <div class="d-grid gap-3">
+            {% set column_tasks = tasks_by_list.get(task_list['id'], []) %}
+            {% if column_tasks %}
+              {% for task in column_tasks %}
+                <div class="task-card card">
+                  <div class="card-body d-flex flex-column gap-3">
+                    <div>
+                      <h3 class="h6 mb-1 text-light">{{ task['title'] }}</h3>
+                      {% if task['description'] %}
+                        <p class="small text-secondary mb-0">{{ task['description'] }}</p>
+                      {% endif %}
+                    </div>
+                    <div class="d-flex flex-wrap justify-content-between align-items-center small text-secondary gap-2">
+                      <span>Logged by {{ task['creator'] or 'team member' }}</span>
+                      <span>{{ task['created_at'] or '' }}</span>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                      {% for option in task_lists %}
+                        {% if option['id'] != task_list['id'] %}
+                          <form method="post" action="{{ url_for('move_task', task_id=task['id']) }}">
+                            <input type="hidden" name="list_id" value="{{ option['id'] }}">
+                            <button class="btn btn-sm btn-outline-straw" type="submit">Move to {{ option['name'] }}</button>
+                          </form>
+                        {% endif %}
+                      {% endfor %}
+                      <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="collapse" data-bs-target="#edit-task-{{ task['id'] }}" aria-expanded="false" aria-controls="edit-task-{{ task['id'] }}">Edit</button>
+                      <form method="post" action="{{ url_for('delete_task', task_id=task['id']) }}" onsubmit="return confirm('Delete this task?');">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                      </form>
+                    </div>
+                    <div class="collapse" id="edit-task-{{ task['id'] }}">
+                      <form method="post" action="{{ url_for('update_task', task_id=task['id']) }}" class="task-edit-form d-grid gap-2 mt-3">
+                        <div>
+                          <label class="form-label small" for="title-{{ task['id'] }}">Title</label>
+                          <input type="text" class="form-control form-control-sm" id="title-{{ task['id'] }}" name="title" value="{{ task['title'] }}" required>
+                        </div>
+                        <div>
+                          <label class="form-label small" for="description-{{ task['id'] }}">Details</label>
+                          <textarea class="form-control form-control-sm" id="description-{{ task['id'] }}" name="description" rows="3">{{ task['description'] or '' }}</textarea>
+                        </div>
+                        <div class="text-end">
+                          <button class="btn btn-sm btn-brand" type="submit">Save changes</button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            {% else %}
+              <div class="empty-column text-secondary text-center py-4 px-3">
+                No tasks here yet. Drop the first card to keep ranch work flowing.
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}
