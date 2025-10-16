@@ -9,15 +9,21 @@
   </head>
   <body>
     <nav class="navbar navbar-dark bg-dark border-bottom border-warning-subtle sticky-top shadow-sm">
-      <div class="container-fluid nav-grid py-2">
-        <div class="nav-left">
-          <a class="btn btn-dashboard" href="{{ url_for('dashboard') if session.get('username') else url_for('login') }}" aria-label="Back to dashboard">
-            Dashboard
-          </a>
-        </div>
-        <a class="navbar-title text-uppercase fw-semibold letter-spacing-1 text-decoration-none" href="{{ url_for('dashboard') if session.get('username') else url_for('login') }}">3 Strands Cattle Co.</a>
-        <div class="nav-right">
+      <div class="container-fluid nav-bar-inner py-2">
+        <a class="navbar-brand d-flex align-items-center gap-3 text-decoration-none" href="{{ url_for('dashboard') if session.get('username') else url_for('login') }}">
+          <span class="navbar-logo rounded shadow-sm">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo">
+          </span>
+          <span class="d-flex flex-column">
+            <span class="navbar-title text-uppercase fw-semibold letter-spacing-1">3 Strands Cattle Co.</span>
+            <span class="navbar-subtitle text-secondary small">Operations Command Center</span>
+          </span>
+        </a>
+        <div class="nav-actions">
           {% if session.get('username') %}
+            <a class="btn btn-dashboard" href="{{ url_for('dashboard') }}" aria-label="Back to dashboard">
+              Dashboard
+            </a>
             <div class="dropdown">
               <button class="nav-avatar-btn" type="button" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account options">
                 {{ (session.get('user_initial') or session.get('username', '')[:1]) | upper }}
@@ -38,10 +44,9 @@
                 <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign out</a></li>
               </ul>
             </div>
+          {% else %}
+            <a class="btn btn-brand" href="{{ url_for('login') }}">Sign In</a>
           {% endif %}
-          <div class="navbar-logo">
-            <img src="{{ url_for('static', filename='logo.png') }}" alt="3 Strands Cattle Co. logo" class="rounded shadow-sm">
-          </div>
         </div>
       </div>
     </nav>

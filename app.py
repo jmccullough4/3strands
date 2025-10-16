@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 from uuid import uuid4
-
-import requests
 from flask import (
     Flask,
     abort,
@@ -34,7 +32,7 @@ app = Flask(__name__, instance_relative_config=True)
 app.config.from_mapping(
     SECRET_KEY="change-this-secret-key",  # consider loading from env or instance/config.py
     UPLOAD_FOLDER=str(UPLOAD_DIR),
-    MAX_CONTENT_LENGTH=20 * 1024 * 1024,  # 20 MB
+    MAX_CONTENT_LENGTH=25 * 1024 * 1024,  # 25 MB
     _DB_INIT=False,  # guard to ensure init_db() runs once in Flask 3.x
 )
 app.config.from_pyfile("config.py", silent=True)
@@ -52,238 +50,41 @@ app.config.setdefault(
     ],
 )
 app.config.setdefault("CALENDAR_TIMEZONE", "America/Chicago")
-app.config.setdefault("TRELLO_API_KEY", os.getenv("TRELLO_API_KEY"))
-app.config.setdefault("TRELLO_API_TOKEN", os.getenv("TRELLO_API_TOKEN"))
-app.config.setdefault("TRELLO_BOARD_ID", os.getenv("TRELLO_BOARD_ID"))
-app.config.setdefault(
-    "TRELLO_BOARD_URL",
-    os.getenv("TRELLO_BOARD_URL", "https://trello.com/b/WLeHBhSM/3-iii"),
-)
-
-
 def slugify(value: str) -> str:
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
     slug = "-".join(filter(None, slug.split("-")))
     return slug or "list"
 
 
-class TrelloError(RuntimeError):
-    """Raised when Trello API operations fail."""
+def _is_completed_list(slug: Optional[str], name: str) -> bool:
+    normalized = (slug or slugify(name)).lower()
+    completed_keywords = (
+        "done",
+        "complete",
+        "completed",
+        "ready",
+        "deliver",
+        "delivered",
+        "finish",
+    )
+    return any(keyword in normalized for keyword in completed_keywords)
 
 
-class TrelloClient:
-    _API_BASE = "https://api.trello.com/1"
+def _compute_task_metrics(task_summary: Iterable[Dict[str, Any]]) -> Dict[str, int]:
+    total_tasks = 0
+    completed_tasks = 0
+    for column in task_summary:
+        count = int(column.get("count") or 0)
+        total_tasks += count
+        if _is_completed_list(column.get("slug"), column.get("name", "")):
+            completed_tasks += count
 
-    def __init__(self, api_key: str, token: str, board_id: str) -> None:
-        self.api_key = api_key
-        self.token = token
-        self.board_id = board_id
-
-    def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: Optional[Dict[str, Any]] = None,
-        json: Optional[Dict[str, Any]] = None,
-    ) -> Any:
-        merged_params = dict(params or {})
-        merged_params.update({"key": self.api_key, "token": self.token})
-        try:
-            response = requests.request(
-                method,
-                f"{self._API_BASE}{path}",
-                params=merged_params,
-                json=json,
-                timeout=10,
-            )
-        except requests.RequestException as exc:  # pragma: no cover - network failure
-            raise TrelloError("Unable to reach Trello. Please try again shortly.") from exc
-
-        if response.status_code >= 400:
-            raise TrelloError(
-                f"Trello API error ({response.status_code}): {response.text.strip() or 'Unknown error.'}"
-            )
-
-        if not response.text:
-            return {}
-        try:
-            return response.json()
-        except ValueError:
-            return {}
-
-    def fetch_board_state(self) -> Tuple[Iterable[Dict[str, Any]], Dict[str, Iterable[Dict[str, Any]]]]:
-        lists = self._request(
-            "GET",
-            f"/boards/{self.board_id}/lists",
-            params={
-                "fields": "name,pos",
-                "cards": "open",
-                "card_fields": "name,desc,dateLastActivity",
-                "card_members": "true",
-                "card_member_fields": "fullName,username",
-            },
-        )
-
-        structured_lists = []
-        tasks_by_list: Dict[str, Iterable[Dict[str, Any]]] = {}
-
-        for trello_list in lists:
-            list_id = trello_list.get("id")
-            if not list_id:
-                continue
-            list_name = trello_list.get("name", "List")
-            structured_lists.append(
-                {
-                    "id": list_id,
-                    "name": list_name,
-                    "slug": slugify(list_name),
-                    "position": trello_list.get("pos", 0),
-                }
-            )
-
-            tasks: list[Dict[str, Any]] = []
-            for card in trello_list.get("cards", []):
-                created_at = card.get("dateLastActivity")
-                formatted_date = ""
-                if created_at:
-                    try:
-                        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                        formatted_date = parsed.strftime("%b %d, %Y %I:%M %p")
-                    except ValueError:
-                        formatted_date = created_at
-
-                members = card.get("members", []) or []
-                member_names = [member.get("fullName") or member.get("username") for member in members]
-                creator = ", ".join(filter(None, member_names)) or "Unassigned"
-
-                tasks.append(
-                    {
-                        "id": card.get("id"),
-                        "title": card.get("name", "Untitled"),
-                        "description": card.get("desc") or None,
-                        "creator": creator,
-                        "created_at": formatted_date,
-                    }
-                )
-
-            tasks_by_list[list_id] = tasks
-
-        structured_lists.sort(key=lambda entry: entry.get("position", 0))
-        return structured_lists, tasks_by_list
-
-    def create_card(self, list_id: str, title: str, description: Optional[str] = None) -> None:
-        self._request(
-            "POST",
-            "/cards",
-            params={
-                "idList": list_id,
-                "name": title,
-                "desc": description or "",
-                "pos": "bottom",
-            },
-        )
-
-    def update_card(self, card_id: str, *, title: str, description: Optional[str]) -> None:
-        self._request(
-            "PUT",
-            f"/cards/{card_id}",
-            params={"name": title, "desc": description or ""},
-        )
-
-    def move_card(self, card_id: str, list_id: str) -> None:
-        self._request(
-            "PUT",
-            f"/cards/{card_id}",
-            params={"idList": list_id, "pos": "bottom"},
-        )
-
-    def delete_card(self, card_id: str) -> None:
-        self._request("DELETE", f"/cards/{card_id}")
-
-    def create_list(self, name: str) -> None:
-        self._request(
-            "POST",
-            "/lists",
-            params={"name": name, "idBoard": self.board_id, "pos": "bottom"},
-        )
-
-    def rename_list(self, list_id: str, name: str) -> None:
-        self._request("PUT", f"/lists/{list_id}", params={"name": name})
-
-    def archive_list(self, list_id: str) -> None:
-        self._request("PUT", f"/lists/{list_id}/closed", params={"value": "true"})
-
-
-def _extract_trello_board_id(board_url: Optional[str]) -> Optional[str]:
-    if not board_url:
-        return None
-
-    parsed = urlparse(board_url)
-    netloc = parsed.netloc.lower()
-    # Allow standard Trello domains regardless of letter casing or ``www`` prefix.
-    host = netloc.split(":", 1)[0]
-    if host not in {"trello.com", "www.trello.com"}:
-        return None
-
-    path_parts = [segment for segment in parsed.path.split("/") if segment]
-    if len(path_parts) >= 2 and path_parts[0] == "b":
-        return path_parts[1]
-
-    return None
-
-
-def get_trello_client() -> Optional[TrelloClient]:
-    api_key = app.config.get("TRELLO_API_KEY")
-    token = app.config.get("TRELLO_API_TOKEN")
-    board_id = app.config.get("TRELLO_BOARD_ID")
-
-    if not board_id:
-        derived = _extract_trello_board_id(app.config.get("TRELLO_BOARD_URL"))
-        if derived:
-            board_id = derived
-            app.config["TRELLO_BOARD_ID"] = derived
-
-    if api_key and token and board_id:
-        return TrelloClient(api_key, token, board_id)
-    return None
-
-
-def _format_trello_board_embed(raw_url: Optional[str]) -> Optional[str]:
-    if not raw_url:
-        return None
-
-    url = raw_url.strip()
-    if not url:
-        return None
-
-    parsed = urlparse(url)
-    netloc = parsed.netloc.lower()
-    host = netloc.split(":", 1)[0]
-    if host in {"trello.com", "www.trello.com"}:
-        path_parts = [segment for segment in parsed.path.split("/") if segment]
-        if len(path_parts) >= 2 and path_parts[0] == "b":
-            board_id = path_parts[1]
-            slug = path_parts[2] if len(path_parts) >= 3 else ""
-            name_param = quote(slug) if slug else ""
-            base = f"https://trello.com/embed/board?id={board_id}&display=board"
-            if name_param:
-                return f"{base}&name={name_param}"
-            return base
-
-    return url
-
-
-def _resolve_trello_board_links() -> Tuple[Optional[str], Optional[str]]:
-    board_url = app.config.get("TRELLO_BOARD_URL")
-    if not isinstance(board_url, str):
-        board_url = ""
-    board_url = board_url.strip()
-    if not board_url:
-        return None, None
-
-    embed_url = _format_trello_board_embed(board_url)
-    return board_url, embed_url
+    open_tasks = max(total_tasks - completed_tasks, 0)
+    return {
+        "total": total_tasks,
+        "completed": completed_tasks,
+        "open": open_tasks,
+    }
 
 
 def _format_calendar_url(raw_url: str, timezone: str) -> str:
@@ -346,6 +147,45 @@ def _ensure_unique_list_slug(conn: sqlite3.Connection, base: str) -> str:
     return slug
 
 
+def _normalize_folder_row(folder_row: Optional[sqlite3.Row]) -> Dict[str, Any]:
+    if folder_row is None:
+        return {"id": None, "name": "Shared Drive", "parent_id": None}
+    return {
+        "id": folder_row["id"],
+        "name": folder_row["name"],
+        "parent_id": folder_row["parent_id"],
+    }
+
+
+def _build_folder_breadcrumbs(
+    conn: sqlite3.Connection, current_folder: Dict[str, Any]
+) -> Iterable[Dict[str, Any]]:
+    breadcrumbs = [{"id": None, "name": "Shared Drive"}]
+    if current_folder.get("id") is None:
+        return breadcrumbs
+
+    lineage = []
+    walker = current_folder
+    visited: set[int] = set()
+    while walker and walker.get("id") is not None:
+        folder_id = walker["id"]
+        if folder_id in visited:
+            break
+        visited.add(folder_id)
+        lineage.append({"id": folder_id, "name": walker["name"]})
+        parent_id = walker.get("parent_id")
+        if parent_id is None:
+            break
+        parent_row = conn.execute(
+            "SELECT id, name, parent_id FROM folders WHERE id = ?",
+            (parent_id,),
+        ).fetchone()
+        walker = _normalize_folder_row(parent_row)
+
+    breadcrumbs.extend(reversed(lineage))
+    return breadcrumbs
+
+
 def _fetch_task_lists(conn: sqlite3.Connection) -> Iterable[sqlite3.Row]:
     return conn.execute(
         "SELECT id, name, slug FROM task_lists ORDER BY position, id"
@@ -381,11 +221,24 @@ def init_db():
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_name TEXT NOT NULL,
                 stored_name TEXT NOT NULL,
                 uploader_id INTEGER NOT NULL,
+                folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -410,13 +263,27 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'todo',
                 position INTEGER NOT NULL DEFAULT 0,
                 created_by INTEGER,
+                assigned_to INTEGER,
+                previous_list_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 list_id INTEGER,
                 FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-                FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE SET NULL
+                FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE SET NULL,
+                FOREIGN KEY (previous_list_id) REFERENCES task_lists(id) ON DELETE SET NULL
             )
             """
         )
+        conn.commit()
+
+        existing_file_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(files)").fetchall()
+        }
+        if "folder_id" not in existing_file_columns:
+            conn.execute(
+                "ALTER TABLE files ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL"
+            )
         conn.commit()
 
         existing_user_columns = {
@@ -439,6 +306,10 @@ def init_db():
         }
         if "list_id" not in existing_tasks_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN list_id INTEGER")
+        if "assigned_to" not in existing_tasks_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN assigned_to INTEGER")
+        if "previous_list_id" not in existing_tasks_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN previous_list_id INTEGER")
         conn.commit()
 
         existing_indexes = {
@@ -457,16 +328,15 @@ def init_db():
             ("Chute Gate", 1),
             ("On Deck", 2),
             ("Ready to Deliver", 3),
+            ("Completed Runs", 4),
         ]
-        existing_lists = conn.execute("SELECT COUNT(*) FROM task_lists").fetchone()[0]
-        if existing_lists == 0:
-            for name, position in default_lists:
-                slug = slugify(name)
-                conn.execute(
-                    "INSERT INTO task_lists (name, slug, position) VALUES (?, ?, ?)",
-                    (name, slug, position),
-                )
-            conn.commit()
+        for name, position in default_lists:
+            slug = slugify(name)
+            conn.execute(
+                "INSERT OR IGNORE INTO task_lists (name, slug, position) VALUES (?, ?, ?)",
+                (name, slug, position),
+            )
+        conn.commit()
 
         # Ensure every task references a list and status slug matches the list
         list_lookup = {
@@ -499,7 +369,7 @@ def init_db():
         if cur.fetchone() is None:
             conn.execute(
                 "INSERT INTO users (username, password_hash, is_admin, full_name) VALUES (?, ?, 1, ?)",
-                ("admin", generate_password_hash("ChangeMe123!"), "Ranch Admin"),
+                ("admin", generate_password_hash("3strands2025!"), "Ranch Admin"),
             )
             conn.commit()
 
@@ -567,100 +437,248 @@ def dashboard():
             """
         ).fetchall()
 
-    task_summary = []
-    trello_client = get_trello_client()
-    if trello_client:
-        try:
-            trello_lists, trello_tasks = trello_client.fetch_board_state()
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            task_summary = [
-                {
-                    "id": task_list["id"],
-                    "name": task_list["name"],
-                    "slug": task_list.get("slug") or slugify(task_list["name"]),
-                    "count": len(trello_tasks.get(task_list["id"], [])),
-                }
-                for task_list in trello_lists
-            ]
-    else:
-        with get_db_connection() as conn:
-            task_lists = list(_fetch_task_lists(conn))
-            task_counts_query = conn.execute(
-                "SELECT list_id, COUNT(*) AS total FROM tasks GROUP BY list_id"
-            ).fetchall()
-        task_counts: Dict[int, int] = {
-            row["list_id"]: row["total"] for row in task_counts_query
+        task_lists = list(_fetch_task_lists(conn))
+        task_counts_query = conn.execute(
+            "SELECT list_id, COUNT(*) AS total FROM tasks GROUP BY list_id"
+        ).fetchall()
+
+    task_counts: Dict[int, int] = {
+        row["list_id"]: row["total"] for row in task_counts_query
+    }
+    task_summary = [
+        {
+            "id": task_list["id"],
+            "name": task_list["name"],
+            "slug": task_list["slug"],
+            "count": task_counts.get(task_list["id"], 0),
         }
-        task_summary = [
-            {
-                "id": task_list["id"],
-                "name": task_list["name"],
-                "slug": task_list["slug"],
-                "count": task_counts.get(task_list["id"], 0),
-            }
-            for task_list in task_lists
-        ]
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
+        for task_list in task_lists
+    ]
     return render_template(
-        "dashboard/index.html",
+        "index.html",
         recent_files=recent_files,
         task_summary=task_summary,
+        task_metrics=_compute_task_metrics(task_summary),
         calendar_embeds=list(_resolve_calendar_embeds()),
-        trello_board_url=trello_board_url,
-        trello_board_embed_url=trello_board_embed_url,
     )
 
 
 @app.route("/files")
 @login_required
 def file_share():
+    folder_id_raw = request.args.get("folder_id", "").strip()
+    if folder_id_raw and not folder_id_raw.isdigit():
+        flash("That folder could not be found.", "warning")
+        return redirect(url_for("file_share"))
+
+    requested_folder_id: Optional[int] = int(folder_id_raw) if folder_id_raw else None
+
     with get_db_connection() as conn:
-        files = conn.execute(
-            """
+        folder_row: Optional[sqlite3.Row] = None
+        if requested_folder_id is not None:
+            folder_row = conn.execute(
+                "SELECT id, name, parent_id FROM folders WHERE id = ?",
+                (requested_folder_id,),
+            ).fetchone()
+            if folder_row is None:
+                flash("That folder is no longer available.", "warning")
+
+        current_folder = _normalize_folder_row(folder_row)
+        breadcrumbs = list(_build_folder_breadcrumbs(conn, current_folder))
+
+        if current_folder["id"] is None:
+            subfolders = conn.execute(
+                """
+                SELECT id, name, parent_id, created_at
+                FROM folders
+                WHERE parent_id IS NULL
+                ORDER BY name COLLATE NOCASE
+                """
+            ).fetchall()
+        else:
+            subfolders = conn.execute(
+                """
+                SELECT id, name, parent_id, created_at
+                FROM folders
+                WHERE parent_id = ?
+                ORDER BY name COLLATE NOCASE
+                """,
+                (current_folder["id"],),
+            ).fetchall()
+
+        base_query = """
             SELECT files.id, files.original_name, files.uploaded_at,
                    COALESCE(NULLIF(users.full_name, ''), users.username) AS uploader,
                    users.username AS uploader_username
             FROM files
             JOIN users ON files.uploader_id = users.id
-            ORDER BY files.uploaded_at DESC
-            """
-        ).fetchall()
-    return render_template("dashboard/files.html", files=files)
+        """
+        if current_folder["id"] is None:
+            files = conn.execute(
+                base_query + " WHERE files.folder_id IS NULL ORDER BY files.uploaded_at DESC"
+            ).fetchall()
+        else:
+            files = conn.execute(
+                base_query + " WHERE files.folder_id = ? ORDER BY files.uploaded_at DESC",
+                (current_folder["id"],),
+            ).fetchall()
+
+    return render_template(
+        "dashboard/files.html",
+        files=files,
+        subfolders=subfolders,
+        current_folder=current_folder,
+        breadcrumbs=breadcrumbs,
+    )
 
 
 @app.route("/upload", methods=["POST"])
 @login_required
 def upload_file():
+    folder_id_raw = request.form.get("folder_id", "").strip()
+    redirect_kwargs: Dict[str, Any] = {}
+    if folder_id_raw and folder_id_raw.isdigit():
+        redirect_kwargs["folder_id"] = int(folder_id_raw)
+
     uploaded_file = request.files.get("file")
     if not uploaded_file or uploaded_file.filename == "":
         flash("Please select a file to upload.", "warning")
-        return redirect(url_for("file_share"))
+        return redirect(url_for("file_share", **redirect_kwargs))
 
     original_name = uploaded_file.filename
     safe_name = secure_filename(original_name)
     if not safe_name:
         flash("The selected file name is not allowed.", "danger")
-        return redirect(url_for("file_share"))
+        return redirect(url_for("file_share", **redirect_kwargs))
 
     stored_name = f"{uuid4().hex}_{safe_name}"
     file_path = UPLOAD_DIR / stored_name
-    try:
-        uploaded_file.save(os.fspath(file_path))
-    except OSError:
-        flash("There was a problem saving the uploaded file.", "danger")
-        return redirect(url_for("file_share"))
-
     with get_db_connection() as conn:
+        folder_id: Optional[int] = None
+        if folder_id_raw:
+            if folder_id_raw.isdigit():
+                candidate = conn.execute(
+                    "SELECT id FROM folders WHERE id = ?",
+                    (int(folder_id_raw),),
+                ).fetchone()
+                if candidate is None:
+                    flash("Choose a valid destination folder.", "danger")
+                    return redirect(url_for("file_share"))
+                folder_id = int(folder_id_raw)
+                redirect_kwargs["folder_id"] = folder_id
+            else:
+                flash("Choose a valid destination folder.", "danger")
+                return redirect(url_for("file_share"))
+
+        try:
+            uploaded_file.save(os.fspath(file_path))
+        except OSError:
+            flash("There was a problem saving the uploaded file.", "danger")
+            return redirect(url_for("file_share", **redirect_kwargs))
+
         conn.execute(
-            "INSERT INTO files (original_name, stored_name, uploader_id) VALUES (?, ?, ?)",
-            (original_name, stored_name, session["user_id"]),
+            """
+            INSERT INTO files (original_name, stored_name, uploader_id, folder_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (original_name, stored_name, session["user_id"], folder_id),
         )
         conn.commit()
 
     flash("File uploaded successfully.", "success")
-    return redirect(url_for("file_share"))
+    return redirect(url_for("file_share", **redirect_kwargs))
+
+
+@app.route("/folders/new", methods=["POST"])
+@login_required
+def create_folder():
+    name = request.form.get("name", "").strip()
+    parent_id_raw = request.form.get("parent_id", "").strip()
+
+    redirect_kwargs: Dict[str, Any] = {}
+    if parent_id_raw and parent_id_raw.isdigit():
+        redirect_kwargs["folder_id"] = int(parent_id_raw)
+
+    if not name:
+        flash("Name your new folder to organize the shared drive.", "warning")
+        return redirect(url_for("file_share", **redirect_kwargs))
+
+    with get_db_connection() as conn:
+        parent_id: Optional[int] = None
+        if parent_id_raw:
+            if parent_id_raw.isdigit():
+                parent_row = conn.execute(
+                    "SELECT id FROM folders WHERE id = ?",
+                    (int(parent_id_raw),),
+                ).fetchone()
+                if parent_row is None:
+                    flash("That parent folder is no longer available.", "danger")
+                    return redirect(url_for("file_share"))
+                parent_id = int(parent_id_raw)
+            else:
+                flash("Choose a valid parent folder.", "danger")
+                return redirect(url_for("file_share"))
+
+        conflict = conn.execute(
+            """
+            SELECT 1
+            FROM folders
+            WHERE name = :name AND (
+                (:parent_id IS NULL AND parent_id IS NULL) OR parent_id = :parent_id
+            )
+            LIMIT 1
+            """,
+            {"parent_id": parent_id, "name": name},
+        ).fetchone()
+        if conflict:
+            flash("A folder with that name already exists here.", "warning")
+            return redirect(url_for("file_share", **redirect_kwargs))
+
+        conn.execute(
+            "INSERT INTO folders (name, parent_id, created_by) VALUES (?, ?, ?)",
+            (name, parent_id, session.get("user_id")),
+        )
+        conn.commit()
+
+    flash("Folder created.", "success")
+    return redirect(url_for("file_share", **redirect_kwargs))
+
+
+@app.route("/folders/<int:folder_id>/delete", methods=["POST"])
+@admin_required
+def delete_folder(folder_id: int):
+    with get_db_connection() as conn:
+        folder = conn.execute(
+            "SELECT id, name, parent_id FROM folders WHERE id = ?",
+            (folder_id,),
+        ).fetchone()
+        if folder is None:
+            flash("That folder could not be found.", "danger")
+            return redirect(url_for("file_share"))
+
+        child_count = conn.execute(
+            "SELECT COUNT(*) FROM folders WHERE parent_id = ?",
+            (folder_id,),
+        ).fetchone()[0]
+        file_count = conn.execute(
+            "SELECT COUNT(*) FROM files WHERE folder_id = ?",
+            (folder_id,),
+        ).fetchone()[0]
+        if child_count or file_count:
+            flash("Empty the folder before deleting it.", "warning")
+            redirect_kwargs = {"folder_id": folder["id"]}
+            return redirect(url_for("file_share", **redirect_kwargs))
+
+        conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+        conn.commit()
+
+        parent_id = folder["parent_id"]
+
+    flash("Folder removed.", "info")
+    redirect_kwargs = {}
+    if parent_id is not None:
+        redirect_kwargs["folder_id"] = parent_id
+    return redirect(url_for("file_share", **redirect_kwargs))
 
 
 @app.route("/download/<int:file_id>")
@@ -912,36 +930,6 @@ def logout():
 @app.route("/tasks")
 @login_required
 def tasks_board():
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        try:
-            task_lists, trello_tasks = trello_client.fetch_board_state()
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-            task_lists = []
-            trello_tasks = {}
-        return render_template(
-            "dashboard/tasks.html",
-            task_lists=task_lists,
-            tasks_by_list=trello_tasks,
-            trello_enabled=True,
-            trello_board_url=trello_board_url,
-            trello_board_embed_url=trello_board_embed_url,
-            trello_embed_only=False,
-        )
-
-    if trello_board_embed_url:
-        return render_template(
-            "dashboard/tasks.html",
-            task_lists=[],
-            tasks_by_list={},
-            trello_enabled=False,
-            trello_board_url=trello_board_url,
-            trello_board_embed_url=trello_board_embed_url,
-            trello_embed_only=True,
-        )
-
     with get_db_connection() as conn:
         task_lists = list(
             conn.execute(
@@ -950,25 +938,45 @@ def tasks_board():
         )
         tasks = conn.execute(
             """
-            SELECT tasks.id, tasks.title, tasks.description, tasks.created_at,
-                   tasks.position, tasks.list_id,
-                   COALESCE(NULLIF(users.full_name, ''), users.username) AS creator
+            SELECT tasks.id,
+                   tasks.title,
+                   tasks.description,
+                   tasks.created_at,
+                   tasks.position,
+                   tasks.list_id,
+                   tasks.status,
+                   tasks.assigned_to,
+                   tasks.previous_list_id,
+                   COALESCE(NULLIF(creator.full_name, ''), creator.username) AS creator,
+                   COALESCE(NULLIF(assignee.full_name, ''), assignee.username) AS assignee
             FROM tasks
-            LEFT JOIN users ON tasks.created_by = users.id
+            LEFT JOIN users AS creator ON tasks.created_by = creator.id
+            LEFT JOIN users AS assignee ON tasks.assigned_to = assignee.id
             ORDER BY tasks.list_id, tasks.position, tasks.created_at
+            """
+        ).fetchall()
+        assignable_users = conn.execute(
+            """
+            SELECT id,
+                   COALESCE(NULLIF(full_name, ''), username) AS display_name
+            FROM users
+            WHERE is_admin = 0
+            ORDER BY display_name COLLATE NOCASE, id
             """
         ).fetchall()
     tasks_by_list: Dict[int, list] = {task_list["id"]: [] for task_list in task_lists}
     for task in tasks:
         tasks_by_list.setdefault(task["list_id"], []).append(task)
+    completed_list = next(
+        (lst for lst in task_lists if _is_completed_list(lst["slug"], lst["name"])),
+        None,
+    )
     return render_template(
         "dashboard/tasks.html",
         task_lists=task_lists,
         tasks_by_list=tasks_by_list,
-        trello_enabled=False,
-        trello_board_url=trello_board_url,
-        trello_board_embed_url=trello_board_embed_url,
-        trello_embed_only=False,
+        assignable_users=assignable_users,
+        completed_list_id=completed_list["id"] if completed_list else None,
     )
 
 
@@ -978,36 +986,17 @@ def create_task():
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
     list_id_raw = request.form.get("list_id", "").strip()
+    assigned_to_raw = request.form.get("assigned_to", "").strip()
 
     if not title:
         flash("Task title is required.", "warning")
         return redirect(url_for("tasks_board"))
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        if not list_id_raw:
-            flash("Select a list on the Trello board.", "danger")
-            return redirect(url_for("tasks_board"))
-        try:
-            trello_client.create_card(list_id_raw, title, description)
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("Task added to the shared Trello board.", "success")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Add cards directly in Trello or configure the API credentials to manage them here.",
-            "warning",
-        )
-        return redirect(url_for("tasks_board"))
-
     if not list_id_raw.isdigit():
         flash("Select a valid task list.", "danger")
         return redirect(url_for("tasks_board"))
 
     list_id = int(list_id_raw)
+    assigned_to_id: Optional[int] = None
     with get_db_connection() as conn:
         task_list = conn.execute(
             "SELECT id, slug FROM task_lists WHERE id = ?",
@@ -1017,14 +1006,28 @@ def create_task():
             flash("That task list no longer exists.", "danger")
             return redirect(url_for("tasks_board"))
 
+        if assigned_to_raw:
+            if assigned_to_raw.isdigit():
+                candidate = conn.execute(
+                    "SELECT id FROM users WHERE id = ? AND is_admin = 0",
+                    (int(assigned_to_raw),),
+                ).fetchone()
+                if candidate is None:
+                    flash("Choose a valid team member for this assignment.", "danger")
+                    return redirect(url_for("tasks_board"))
+                assigned_to_id = int(assigned_to_raw)
+            elif assigned_to_raw.lower() not in {"", "none", "null"}:
+                flash("Choose a valid team member for this assignment.", "danger")
+                return redirect(url_for("tasks_board"))
+
         current_position = conn.execute(
             "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE list_id = ?",
             (list_id,),
         ).fetchone()[0]
         conn.execute(
             """
-            INSERT INTO tasks (title, description, status, position, created_by, list_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tasks (title, description, status, position, created_by, assigned_to, list_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 title,
@@ -1032,6 +1035,7 @@ def create_task():
                 task_list["slug"],
                 current_position + 1,
                 session.get("user_id"),
+                assigned_to_id,
                 list_id,
             ),
         )
@@ -1041,31 +1045,117 @@ def create_task():
     return redirect(url_for("tasks_board"))
 
 
+@app.route("/tasks/<task_id>/toggle", methods=["POST"])
+@login_required
+def toggle_task_completion(task_id: str):
+    completed_raw = request.form.get("completed", "0").strip()
+    current_list_raw = request.form.get("current_list_id", "").strip()
+
+    if not task_id.isdigit():
+        flash("Task could not be found.", "danger")
+        return redirect(url_for("tasks_board"))
+    if not current_list_raw.isdigit():
+        flash("That task list is not available.", "danger")
+        return redirect(url_for("tasks_board"))
+
+    task_id_int = int(task_id)
+    current_list_id = int(current_list_raw)
+    completed_flag = completed_raw == "1"
+
+    with get_db_connection() as conn:
+        task = conn.execute(
+            "SELECT id, list_id, previous_list_id FROM tasks WHERE id = ?",
+            (task_id_int,),
+        ).fetchone()
+        if task is None:
+            flash("Task could not be found.", "danger")
+            return redirect(url_for("tasks_board"))
+
+        task_lists = list(_fetch_task_lists(conn))
+        lists_by_id = {lst["id"]: lst for lst in task_lists}
+        completed_list = next(
+            (lst for lst in task_lists if _is_completed_list(lst["slug"], lst["name"])),
+            None,
+        )
+
+        if completed_flag:
+            if completed_list is None:
+                flash("Create a Completed list before marking tasks done.", "warning")
+                return redirect(url_for("tasks_board"))
+            previous_list_id = (
+                task["list_id"]
+                if task["list_id"] != completed_list["id"]
+                else task["previous_list_id"]
+            )
+            max_position = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE list_id = ?",
+                (completed_list["id"],),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                UPDATE tasks
+                SET list_id = ?, status = ?, position = ?, previous_list_id = ?
+                WHERE id = ?
+                """,
+                (
+                    completed_list["id"],
+                    completed_list["slug"],
+                    max_position + 1,
+                    previous_list_id,
+                    task_id_int,
+                ),
+            )
+        else:
+            if not task_lists:
+                flash("Add a task list to reopen items.", "warning")
+                return redirect(url_for("tasks_board"))
+
+            target_list_id = task["previous_list_id"]
+            if target_list_id is None or target_list_id not in lists_by_id:
+                target_list_id = next(
+                    (
+                        lst["id"]
+                        for lst in task_lists
+                        if lst["id"]
+                        != (completed_list["id"] if completed_list else None)
+                        and not _is_completed_list(lst["slug"], lst["name"])
+                    ),
+                    None,
+                )
+            target_list = lists_by_id.get(target_list_id)
+            if target_list is None:
+                target_list = lists_by_id.get(current_list_id)
+            if target_list is None:
+                flash("That task list is not available.", "danger")
+                return redirect(url_for("tasks_board"))
+
+            max_position = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE list_id = ?",
+                (target_list["id"],),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                UPDATE tasks
+                SET list_id = ?, status = ?, position = ?, previous_list_id = NULL
+                WHERE id = ?
+                """,
+                (
+                    target_list["id"],
+                    target_list["slug"],
+                    max_position + 1,
+                    task_id_int,
+                ),
+            )
+        conn.commit()
+
+    flash("Task updated.", "success")
+    return redirect(url_for("tasks_board"))
+
+
 @app.route("/tasks/<task_id>/move", methods=["POST"])
 @login_required
 def move_task(task_id: str):
     list_id_raw = request.form.get("list_id", "").strip()
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        if not list_id_raw:
-            flash("That Trello list is not available.", "danger")
-            return redirect(url_for("tasks_board"))
-        try:
-            trello_client.move_card(task_id, list_id_raw)
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("Task updated.", "success")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Move cards directly in Trello or add API credentials to sync from the dashboard.",
-            "warning",
-        )
-        return redirect(url_for("tasks_board"))
-
     if not list_id_raw.isdigit() or not task_id.isdigit():
         flash("That list is not available.", "danger")
         return redirect(url_for("tasks_board"))
@@ -1085,7 +1175,7 @@ def move_task(task_id: str):
             (list_id,),
         ).fetchone()[0]
         cursor = conn.execute(
-            "UPDATE tasks SET list_id = ?, status = ?, position = ? WHERE id = ?",
+            "UPDATE tasks SET list_id = ?, status = ?, position = ?, previous_list_id = NULL WHERE id = ?",
             (list_id, task_list["slug"], max_position + 1, task_id_int),
         )
         conn.commit()
@@ -1102,37 +1192,31 @@ def move_task(task_id: str):
 def update_task(task_id: str):
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
+    assigned_to_raw = request.form.get("assigned_to", "").strip()
 
     if not title:
         flash("Task title cannot be empty.", "warning")
         return redirect(url_for("tasks_board"))
 
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        try:
-            trello_client.update_card(
-                task_id,
-                title=title,
-                description=description or None,
-            )
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("Task details saved.", "success")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Edit cards directly in Trello or configure the API credentials to manage them here.",
-            "warning",
-        )
-        return redirect(url_for("tasks_board"))
-
+    assigned_to_id: Optional[int] = None
     with get_db_connection() as conn:
+        if assigned_to_raw:
+            if assigned_to_raw.isdigit():
+                candidate = conn.execute(
+                    "SELECT id FROM users WHERE id = ? AND is_admin = 0",
+                    (int(assigned_to_raw),),
+                ).fetchone()
+                if candidate is None:
+                    flash("Choose a valid team member for this assignment.", "danger")
+                    return redirect(url_for("tasks_board"))
+                assigned_to_id = int(assigned_to_raw)
+            elif assigned_to_raw.lower() not in {"", "none", "null"}:
+                flash("Choose a valid team member for this assignment.", "danger")
+                return redirect(url_for("tasks_board"))
+
         cursor = conn.execute(
-            "UPDATE tasks SET title = ?, description = ? WHERE id = ?",
-            (title, description or None, int(task_id)),
+            "UPDATE tasks SET title = ?, description = ?, assigned_to = ? WHERE id = ?",
+            (title, description or None, assigned_to_id, int(task_id)),
         )
         conn.commit()
 
@@ -1146,24 +1230,6 @@ def update_task(task_id: str):
 @app.route("/tasks/<task_id>/delete", methods=["POST"])
 @login_required
 def delete_task(task_id: str):
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        try:
-            trello_client.delete_card(task_id)
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("Task removed from the board.", "info")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Remove cards directly in Trello or configure the API credentials to manage them here.",
-            "warning",
-        )
-        return redirect(url_for("tasks_board"))
-
     if not task_id.isdigit():
         flash("Task could not be found.", "danger")
         return redirect(url_for("tasks_board"))
@@ -1185,24 +1251,6 @@ def create_task_list():
     name = request.form.get("name", "").strip()
     if not name:
         flash("Name your new list to keep the board organized.", "warning")
-        return redirect(url_for("tasks_board"))
-
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        try:
-            trello_client.create_list(name)
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("New Trello list added to the board.", "success")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Create lists directly in Trello or configure the API credentials to manage them here.",
-            "warning",
-        )
         return redirect(url_for("tasks_board"))
 
     with get_db_connection() as conn:
@@ -1227,24 +1275,6 @@ def rename_task_list(list_id: str):
     name = request.form.get("name", "").strip()
     if not name:
         flash("List names cannot be empty.", "warning")
-        return redirect(url_for("tasks_board"))
-
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        try:
-            trello_client.rename_list(list_id, name)
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("List updated.", "success")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Rename lists directly in Trello or configure the API credentials to manage them here.",
-            "warning",
-        )
         return redirect(url_for("tasks_board"))
 
     if not list_id.isdigit():
@@ -1279,24 +1309,6 @@ def rename_task_list(list_id: str):
 @app.route("/tasks/lists/<list_id>/delete", methods=["POST"])
 @login_required
 def delete_task_list(list_id: str):
-    trello_client = get_trello_client()
-    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
-    if trello_client:
-        try:
-            trello_client.archive_list(list_id)
-        except TrelloError as exc:
-            flash(str(exc), "danger")
-        else:
-            flash("List archived on Trello.", "info")
-        return redirect(url_for("tasks_board"))
-
-    if trello_board_embed_url:
-        flash(
-            "The Trello board is active. Archive lists directly in Trello or configure the API credentials to manage them here.",
-            "warning",
-        )
-        return redirect(url_for("tasks_board"))
-
     if not list_id.isdigit():
         flash("That list could not be found.", "danger")
         return redirect(url_for("tasks_board"))
@@ -1335,4 +1347,4 @@ if __name__ == "__main__":
     init_db()
     debug_env = os.environ.get("FLASK_DEBUG", "")
     debug_mode = debug_env.lower() in {"1", "true", "t", "yes", "on"}
-    app.run(host="0.0.0.0", port=8081, debug=debug_mode)
+    app.run(host="127.0.0.1", port=8081, debug=debug_mode)
