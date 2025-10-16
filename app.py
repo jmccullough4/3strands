@@ -265,8 +265,11 @@ def _format_trello_board_embed(raw_url: Optional[str]) -> Optional[str]:
         if len(path_parts) >= 2 and path_parts[0] == "b":
             board_id = path_parts[1]
             slug = path_parts[2] if len(path_parts) >= 3 else ""
-            slug_segment = f"/{slug}" if slug else ""
-            return f"https://trello.com/b/{board_id}{slug_segment}.html"
+            name_param = quote(slug) if slug else ""
+            base = f"https://trello.com/embed/board?id={board_id}&display=board"
+            if name_param:
+                return f"{base}&name={name_param}"
+            return base
 
     return url
 
