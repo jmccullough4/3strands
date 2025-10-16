@@ -220,7 +220,10 @@ def _extract_trello_board_id(board_url: Optional[str]) -> Optional[str]:
         return None
 
     parsed = urlparse(board_url)
-    if parsed.netloc != "trello.com":
+    netloc = parsed.netloc.lower()
+    # Allow standard Trello domains regardless of letter casing or ``www`` prefix.
+    host = netloc.split(":", 1)[0]
+    if host not in {"trello.com", "www.trello.com"}:
         return None
 
     path_parts = [segment for segment in parsed.path.split("/") if segment]
@@ -255,7 +258,9 @@ def _format_trello_board_embed(raw_url: Optional[str]) -> Optional[str]:
         return None
 
     parsed = urlparse(url)
-    if parsed.netloc == "trello.com":
+    netloc = parsed.netloc.lower()
+    host = netloc.split(":", 1)[0]
+    if host in {"trello.com", "www.trello.com"}:
         path_parts = [segment for segment in parsed.path.split("/") if segment]
         if len(path_parts) >= 2 and path_parts[0] == "b":
             board_id = path_parts[1]
