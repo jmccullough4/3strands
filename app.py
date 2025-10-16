@@ -995,6 +995,10 @@ def tasks_board():
     tasks_by_list: Dict[int, list] = {task_list["id"]: [] for task_list in board_lists}
     for task in tasks:
         tasks_by_list.setdefault(task["list_id"], []).append(task)
+    completed_list = next(
+        (lst for lst in task_lists if _is_completed_list(lst["slug"], lst["name"])),
+        None,
+    )
     return render_template(
         "dashboard/tasks.html",
         board_lists=board_lists,
