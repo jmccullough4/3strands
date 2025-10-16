@@ -8,6 +8,11 @@
             <h1 class="h4 brand-accent mb-2">Shared Task Board</h1>
             <p class="text-secondary mb-0">Coordinate livestock care, deliveries, farmers market prep, and cooler upkeep so every cut reaches the table with excellence.</p>
           </div>
+          {% if trello_enabled %}
+            <div class="alert alert-warning bg-dark border-warning text-warning mb-0" role="alert">
+              Live with Trello &mdash; cards, lists, and updates sync instantly with the shared board.
+            </div>
+          {% endif %}
           <form method="post" action="{{ url_for('create_task') }}" class="d-grid gap-3">
             <div>
               <label for="title" class="form-label">Task title</label>
@@ -35,7 +40,7 @@
               <label for="list-name" class="form-label">Add a new list</label>
               <input type="text" class="form-control" id="list-name" name="name" placeholder="Add 'Butcher Prep' or 'Farmers Market'" required>
             </div>
-            <button type="submit" class="btn btn-outline-straw">Create List</button>
+            <button type="submit" class="btn btn-outline-straw">{{ 'Add Trello List' if trello_enabled else 'Create List' }}</button>
           </form>
         </div>
       </div>
@@ -78,8 +83,9 @@
                 <button class="btn btn-outline-warning" type="submit">Save</button>
               </div>
             </form>
-            <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('Remove this list? Tasks must be moved first.');">
-              <button class="btn btn-sm btn-outline-danger w-100" type="submit">Delete list</button>
+            {% set confirm_message = 'Archive this Trello list?' if trello_enabled else 'Remove this list? Tasks must be moved first.' %}
+            <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('{{ confirm_message }}');">
+              <button class="btn btn-sm btn-outline-danger w-100" type="submit">{{ 'Archive list' if trello_enabled else 'Delete list' }}</button>
             </form>
           </div>
           <div class="d-grid gap-3">
@@ -96,7 +102,7 @@
                     </div>
                     <div class="d-flex flex-wrap justify-content-between align-items-center small text-secondary gap-2">
                       <span>Logged by {{ task['creator'] or 'team member' }}</span>
-                      <span>{{ task['created_at'] }}</span>
+                      <span>{{ task['created_at'] or '' }}</span>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
                       {% for option in task_lists %}

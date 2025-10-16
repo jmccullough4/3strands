@@ -1,11 +1,13 @@
 import os
 import sqlite3
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 from uuid import uuid4
 
+import requests
 from flask import (
     Flask,
     abort,
@@ -50,12 +52,172 @@ app.config.setdefault(
     ],
 )
 app.config.setdefault("CALENDAR_TIMEZONE", "America/Chicago")
+app.config.setdefault("TRELLO_API_KEY", os.getenv("TRELLO_API_KEY"))
+app.config.setdefault("TRELLO_API_TOKEN", os.getenv("TRELLO_API_TOKEN"))
+app.config.setdefault("TRELLO_BOARD_ID", os.getenv("TRELLO_BOARD_ID"))
 
 
 def slugify(value: str) -> str:
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
     slug = "-".join(filter(None, slug.split("-")))
     return slug or "list"
+
+
+class TrelloError(RuntimeError):
+    """Raised when Trello API operations fail."""
+
+
+class TrelloClient:
+    _API_BASE = "https://api.trello.com/1"
+
+    def __init__(self, api_key: str, token: str, board_id: str) -> None:
+        self.api_key = api_key
+        self.token = token
+        self.board_id = board_id
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        json: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        merged_params = dict(params or {})
+        merged_params.update({"key": self.api_key, "token": self.token})
+        try:
+            response = requests.request(
+                method,
+                f"{self._API_BASE}{path}",
+                params=merged_params,
+                json=json,
+                timeout=10,
+            )
+        except requests.RequestException as exc:  # pragma: no cover - network failure
+            raise TrelloError("Unable to reach Trello. Please try again shortly.") from exc
+
+        if response.status_code >= 400:
+            raise TrelloError(
+                f"Trello API error ({response.status_code}): {response.text.strip() or 'Unknown error.'}"
+            )
+
+        if not response.text:
+            return {}
+        try:
+            return response.json()
+        except ValueError:
+            return {}
+
+    def fetch_board_state(self) -> Tuple[Iterable[Dict[str, Any]], Dict[str, Iterable[Dict[str, Any]]]]:
+        lists = self._request(
+            "GET",
+            f"/boards/{self.board_id}/lists",
+            params={
+                "fields": "name,pos",
+                "cards": "open",
+                "card_fields": "name,desc,dateLastActivity",
+                "card_members": "true",
+                "card_member_fields": "fullName,username",
+            },
+        )
+
+        structured_lists = []
+        tasks_by_list: Dict[str, Iterable[Dict[str, Any]]] = {}
+
+        for trello_list in lists:
+            list_id = trello_list.get("id")
+            if not list_id:
+                continue
+            list_name = trello_list.get("name", "List")
+            structured_lists.append(
+                {
+                    "id": list_id,
+                    "name": list_name,
+                    "slug": slugify(list_name),
+                    "position": trello_list.get("pos", 0),
+                }
+            )
+
+            tasks: list[Dict[str, Any]] = []
+            for card in trello_list.get("cards", []):
+                created_at = card.get("dateLastActivity")
+                formatted_date = ""
+                if created_at:
+                    try:
+                        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        formatted_date = parsed.strftime("%b %d, %Y %I:%M %p")
+                    except ValueError:
+                        formatted_date = created_at
+
+                members = card.get("members", []) or []
+                member_names = [member.get("fullName") or member.get("username") for member in members]
+                creator = ", ".join(filter(None, member_names)) or "Unassigned"
+
+                tasks.append(
+                    {
+                        "id": card.get("id"),
+                        "title": card.get("name", "Untitled"),
+                        "description": card.get("desc") or None,
+                        "creator": creator,
+                        "created_at": formatted_date,
+                    }
+                )
+
+            tasks_by_list[list_id] = tasks
+
+        structured_lists.sort(key=lambda entry: entry.get("position", 0))
+        return structured_lists, tasks_by_list
+
+    def create_card(self, list_id: str, title: str, description: Optional[str] = None) -> None:
+        self._request(
+            "POST",
+            "/cards",
+            params={
+                "idList": list_id,
+                "name": title,
+                "desc": description or "",
+                "pos": "bottom",
+            },
+        )
+
+    def update_card(self, card_id: str, *, title: str, description: Optional[str]) -> None:
+        self._request(
+            "PUT",
+            f"/cards/{card_id}",
+            params={"name": title, "desc": description or ""},
+        )
+
+    def move_card(self, card_id: str, list_id: str) -> None:
+        self._request(
+            "PUT",
+            f"/cards/{card_id}",
+            params={"idList": list_id, "pos": "bottom"},
+        )
+
+    def delete_card(self, card_id: str) -> None:
+        self._request("DELETE", f"/cards/{card_id}")
+
+    def create_list(self, name: str) -> None:
+        self._request(
+            "POST",
+            "/lists",
+            params={"name": name, "idBoard": self.board_id, "pos": "bottom"},
+        )
+
+    def rename_list(self, list_id: str, name: str) -> None:
+        self._request("PUT", f"/lists/{list_id}", params={"name": name})
+
+    def archive_list(self, list_id: str) -> None:
+        self._request("PUT", f"/lists/{list_id}/closed", params={"value": "true"})
+
+
+def get_trello_client() -> Optional[TrelloClient]:
+    api_key = app.config.get("TRELLO_API_KEY")
+    token = app.config.get("TRELLO_API_TOKEN")
+    board_id = app.config.get("TRELLO_BOARD_ID")
+    if api_key and token and board_id:
+        return TrelloClient(api_key, token, board_id)
+    return None
 
 
 def _format_calendar_url(raw_url: str, timezone: str) -> str:
@@ -338,20 +500,42 @@ def dashboard():
             LIMIT 5
             """
         ).fetchall()
-        task_lists = list(_fetch_task_lists(conn))
-        task_counts_query = conn.execute(
-            "SELECT list_id, COUNT(*) AS total FROM tasks GROUP BY list_id"
-        ).fetchall()
-    task_counts: Dict[int, int] = {row["list_id"]: row["total"] for row in task_counts_query}
-    task_summary = [
-        {
-            "id": task_list["id"],
-            "name": task_list["name"],
-            "slug": task_list["slug"],
-            "count": task_counts.get(task_list["id"], 0),
+
+    task_summary = []
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            trello_lists, trello_tasks = trello_client.fetch_board_state()
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            task_summary = [
+                {
+                    "id": task_list["id"],
+                    "name": task_list["name"],
+                    "slug": task_list.get("slug") or slugify(task_list["name"]),
+                    "count": len(trello_tasks.get(task_list["id"], [])),
+                }
+                for task_list in trello_lists
+            ]
+    else:
+        with get_db_connection() as conn:
+            task_lists = list(_fetch_task_lists(conn))
+            task_counts_query = conn.execute(
+                "SELECT list_id, COUNT(*) AS total FROM tasks GROUP BY list_id"
+            ).fetchall()
+        task_counts: Dict[int, int] = {
+            row["list_id"]: row["total"] for row in task_counts_query
         }
-        for task_list in task_lists
-    ]
+        task_summary = [
+            {
+                "id": task_list["id"],
+                "name": task_list["name"],
+                "slug": task_list["slug"],
+                "count": task_counts.get(task_list["id"], 0),
+            }
+            for task_list in task_lists
+        ]
     return render_template(
         "dashboard/index.html",
         recent_files=recent_files,
@@ -659,6 +843,21 @@ def logout():
 @app.route("/tasks")
 @login_required
 def tasks_board():
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            task_lists, trello_tasks = trello_client.fetch_board_state()
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+            task_lists = []
+            trello_tasks = {}
+        return render_template(
+            "dashboard/tasks.html",
+            task_lists=task_lists,
+            tasks_by_list=trello_tasks,
+            trello_enabled=True,
+        )
+
     with get_db_connection() as conn:
         task_lists = list(
             conn.execute(
@@ -682,6 +881,7 @@ def tasks_board():
         "dashboard/tasks.html",
         task_lists=task_lists,
         tasks_by_list=tasks_by_list,
+        trello_enabled=False,
     )
 
 
@@ -695,6 +895,19 @@ def create_task():
     if not title:
         flash("Task title is required.", "warning")
         return redirect(url_for("tasks_board"))
+    trello_client = get_trello_client()
+    if trello_client:
+        if not list_id_raw:
+            flash("Select a list on the Trello board.", "danger")
+            return redirect(url_for("tasks_board"))
+        try:
+            trello_client.create_card(list_id_raw, title, description)
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("Task added to the shared Trello board.", "success")
+        return redirect(url_for("tasks_board"))
+
     if not list_id_raw.isdigit():
         flash("Select a valid task list.", "danger")
         return redirect(url_for("tasks_board"))
@@ -733,15 +946,29 @@ def create_task():
     return redirect(url_for("tasks_board"))
 
 
-@app.route("/tasks/<int:task_id>/move", methods=["POST"])
+@app.route("/tasks/<task_id>/move", methods=["POST"])
 @login_required
-def move_task(task_id: int):
+def move_task(task_id: str):
     list_id_raw = request.form.get("list_id", "").strip()
-    if not list_id_raw.isdigit():
+    trello_client = get_trello_client()
+    if trello_client:
+        if not list_id_raw:
+            flash("That Trello list is not available.", "danger")
+            return redirect(url_for("tasks_board"))
+        try:
+            trello_client.move_card(task_id, list_id_raw)
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("Task updated.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if not list_id_raw.isdigit() or not task_id.isdigit():
         flash("That list is not available.", "danger")
         return redirect(url_for("tasks_board"))
 
     list_id = int(list_id_raw)
+    task_id_int = int(task_id)
     with get_db_connection() as conn:
         task_list = conn.execute(
             "SELECT id, slug FROM task_lists WHERE id = ?",
@@ -756,7 +983,7 @@ def move_task(task_id: int):
         ).fetchone()[0]
         cursor = conn.execute(
             "UPDATE tasks SET list_id = ?, status = ?, position = ? WHERE id = ?",
-            (list_id, task_list["slug"], max_position + 1, task_id),
+            (list_id, task_list["slug"], max_position + 1, task_id_int),
         )
         conn.commit()
 
@@ -767,9 +994,9 @@ def move_task(task_id: int):
     return redirect(url_for("tasks_board"))
 
 
-@app.route("/tasks/<int:task_id>/update", methods=["POST"])
+@app.route("/tasks/<task_id>/update", methods=["POST"])
 @login_required
-def update_task(task_id: int):
+def update_task(task_id: str):
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
 
@@ -777,10 +1004,28 @@ def update_task(task_id: int):
         flash("Task title cannot be empty.", "warning")
         return redirect(url_for("tasks_board"))
 
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            trello_client.update_card(
+                task_id,
+                title=title,
+                description=description or None,
+            )
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("Task details saved.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if not task_id.isdigit():
+        flash("Task could not be found.", "danger")
+        return redirect(url_for("tasks_board"))
+
     with get_db_connection() as conn:
         cursor = conn.execute(
             "UPDATE tasks SET title = ?, description = ? WHERE id = ?",
-            (title, description or None, task_id),
+            (title, description or None, int(task_id)),
         )
         conn.commit()
 
@@ -791,11 +1036,25 @@ def update_task(task_id: int):
     return redirect(url_for("tasks_board"))
 
 
-@app.route("/tasks/<int:task_id>/delete", methods=["POST"])
+@app.route("/tasks/<task_id>/delete", methods=["POST"])
 @login_required
-def delete_task(task_id: int):
+def delete_task(task_id: str):
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            trello_client.delete_card(task_id)
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("Task removed from the board.", "info")
+        return redirect(url_for("tasks_board"))
+
+    if not task_id.isdigit():
+        flash("Task could not be found.", "danger")
+        return redirect(url_for("tasks_board"))
+
     with get_db_connection() as conn:
-        cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (int(task_id),))
         conn.commit()
 
     if cursor.rowcount:
@@ -811,6 +1070,16 @@ def create_task_list():
     name = request.form.get("name", "").strip()
     if not name:
         flash("Name your new list to keep the board organized.", "warning")
+        return redirect(url_for("tasks_board"))
+
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            trello_client.create_list(name)
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("New Trello list added to the board.", "success")
         return redirect(url_for("tasks_board"))
 
     with get_db_connection() as conn:
@@ -829,18 +1098,33 @@ def create_task_list():
     return redirect(url_for("tasks_board"))
 
 
-@app.route("/tasks/lists/<int:list_id>/rename", methods=["POST"])
+@app.route("/tasks/lists/<list_id>/rename", methods=["POST"])
 @login_required
-def rename_task_list(list_id: int):
+def rename_task_list(list_id: str):
     name = request.form.get("name", "").strip()
     if not name:
         flash("List names cannot be empty.", "warning")
         return redirect(url_for("tasks_board"))
 
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            trello_client.rename_list(list_id, name)
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("List updated.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if not list_id.isdigit():
+        flash("That list could not be found.", "danger")
+        return redirect(url_for("tasks_board"))
+
+    list_id_int = int(list_id)
     with get_db_connection() as conn:
         current = conn.execute(
             "SELECT slug FROM task_lists WHERE id = ?",
-            (list_id,),
+            (list_id_int,),
         ).fetchone()
         if current is None:
             flash("That list could not be found.", "danger")
@@ -849,11 +1133,11 @@ def rename_task_list(list_id: int):
         slug = current["slug"] if current["slug"] == base_slug else _ensure_unique_list_slug(conn, base_slug)
         conn.execute(
             "UPDATE task_lists SET name = ?, slug = ? WHERE id = ?",
-            (name, slug, list_id),
+            (name, slug, list_id_int),
         )
         conn.execute(
             "UPDATE tasks SET status = ? WHERE list_id = ?",
-            (slug, list_id),
+            (slug, list_id_int),
         )
         conn.commit()
 
@@ -861,9 +1145,24 @@ def rename_task_list(list_id: int):
     return redirect(url_for("tasks_board"))
 
 
-@app.route("/tasks/lists/<int:list_id>/delete", methods=["POST"])
+@app.route("/tasks/lists/<list_id>/delete", methods=["POST"])
 @login_required
-def delete_task_list(list_id: int):
+def delete_task_list(list_id: str):
+    trello_client = get_trello_client()
+    if trello_client:
+        try:
+            trello_client.archive_list(list_id)
+        except TrelloError as exc:
+            flash(str(exc), "danger")
+        else:
+            flash("List archived on Trello.", "info")
+        return redirect(url_for("tasks_board"))
+
+    if not list_id.isdigit():
+        flash("That list could not be found.", "danger")
+        return redirect(url_for("tasks_board"))
+
+    list_id_int = int(list_id)
     with get_db_connection() as conn:
         total_lists = conn.execute("SELECT COUNT(*) FROM task_lists").fetchone()[0]
         if total_lists <= 1:
@@ -872,7 +1171,7 @@ def delete_task_list(list_id: int):
 
         existing = conn.execute(
             "SELECT id FROM task_lists WHERE id = ?",
-            (list_id,),
+            (list_id_int,),
         ).fetchone()
         if existing is None:
             flash("That list could not be found.", "danger")
@@ -880,13 +1179,13 @@ def delete_task_list(list_id: int):
 
         has_tasks = conn.execute(
             "SELECT COUNT(*) FROM tasks WHERE list_id = ?",
-            (list_id,),
+            (list_id_int,),
         ).fetchone()[0]
         if has_tasks:
             flash("Move or archive the tasks before deleting this list.", "danger")
             return redirect(url_for("tasks_board"))
 
-        conn.execute("DELETE FROM task_lists WHERE id = ?", (list_id,))
+        conn.execute("DELETE FROM task_lists WHERE id = ?", (list_id_int,))
         conn.commit()
 
     flash("List removed.", "info")
