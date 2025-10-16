@@ -32,7 +32,7 @@ app = Flask(__name__, instance_relative_config=True)
 app.config.from_mapping(
     SECRET_KEY="change-this-secret-key",  # consider loading from env or instance/config.py
     UPLOAD_FOLDER=str(UPLOAD_DIR),
-    MAX_CONTENT_LENGTH=20 * 1024 * 1024,  # 20 MB
+    MAX_CONTENT_LENGTH=25 * 1024 * 1024,  # 25 MB
     _DB_INIT=False,  # guard to ensure init_db() runs once in Flask 3.x
 )
 app.config.from_pyfile("config.py", silent=True)
@@ -147,6 +147,45 @@ def _ensure_unique_list_slug(conn: sqlite3.Connection, base: str) -> str:
     return slug
 
 
+def _normalize_folder_row(folder_row: Optional[sqlite3.Row]) -> Dict[str, Any]:
+    if folder_row is None:
+        return {"id": None, "name": "Shared Drive", "parent_id": None}
+    return {
+        "id": folder_row["id"],
+        "name": folder_row["name"],
+        "parent_id": folder_row["parent_id"],
+    }
+
+
+def _build_folder_breadcrumbs(
+    conn: sqlite3.Connection, current_folder: Dict[str, Any]
+) -> Iterable[Dict[str, Any]]:
+    breadcrumbs = [{"id": None, "name": "Shared Drive"}]
+    if current_folder.get("id") is None:
+        return breadcrumbs
+
+    lineage = []
+    walker = current_folder
+    visited: set[int] = set()
+    while walker and walker.get("id") is not None:
+        folder_id = walker["id"]
+        if folder_id in visited:
+            break
+        visited.add(folder_id)
+        lineage.append({"id": folder_id, "name": walker["name"]})
+        parent_id = walker.get("parent_id")
+        if parent_id is None:
+            break
+        parent_row = conn.execute(
+            "SELECT id, name, parent_id FROM folders WHERE id = ?",
+            (parent_id,),
+        ).fetchone()
+        walker = _normalize_folder_row(parent_row)
+
+    breadcrumbs.extend(reversed(lineage))
+    return breadcrumbs
+
+
 def _fetch_task_lists(conn: sqlite3.Connection) -> Iterable[sqlite3.Row]:
     return conn.execute(
         "SELECT id, name, slug FROM task_lists ORDER BY position, id"
@@ -182,11 +221,24 @@ def init_db():
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_name TEXT NOT NULL,
                 stored_name TEXT NOT NULL,
                 uploader_id INTEGER NOT NULL,
+                folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -220,6 +272,16 @@ def init_db():
             )
             """
         )
+        conn.commit()
+
+        existing_file_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(files)").fetchall()
+        }
+        if "folder_id" not in existing_file_columns:
+            conn.execute(
+                "ALTER TABLE files ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL"
+            )
         conn.commit()
 
         existing_user_columns = {
@@ -400,51 +462,219 @@ def dashboard():
 @app.route("/files")
 @login_required
 def file_share():
+    folder_id_raw = request.args.get("folder_id", "").strip()
+    if folder_id_raw and not folder_id_raw.isdigit():
+        flash("That folder could not be found.", "warning")
+        return redirect(url_for("file_share"))
+
+    requested_folder_id: Optional[int] = int(folder_id_raw) if folder_id_raw else None
+
     with get_db_connection() as conn:
-        files = conn.execute(
-            """
+        folder_row: Optional[sqlite3.Row] = None
+        if requested_folder_id is not None:
+            folder_row = conn.execute(
+                "SELECT id, name, parent_id FROM folders WHERE id = ?",
+                (requested_folder_id,),
+            ).fetchone()
+            if folder_row is None:
+                flash("That folder is no longer available.", "warning")
+
+        current_folder = _normalize_folder_row(folder_row)
+        breadcrumbs = list(_build_folder_breadcrumbs(conn, current_folder))
+
+        if current_folder["id"] is None:
+            subfolders = conn.execute(
+                """
+                SELECT id, name, parent_id, created_at
+                FROM folders
+                WHERE parent_id IS NULL
+                ORDER BY name COLLATE NOCASE
+                """
+            ).fetchall()
+        else:
+            subfolders = conn.execute(
+                """
+                SELECT id, name, parent_id, created_at
+                FROM folders
+                WHERE parent_id = ?
+                ORDER BY name COLLATE NOCASE
+                """,
+                (current_folder["id"],),
+            ).fetchall()
+
+        base_query = """
             SELECT files.id, files.original_name, files.uploaded_at,
                    COALESCE(NULLIF(users.full_name, ''), users.username) AS uploader,
                    users.username AS uploader_username
             FROM files
             JOIN users ON files.uploader_id = users.id
-            ORDER BY files.uploaded_at DESC
-            """
-        ).fetchall()
-    return render_template("dashboard/files.html", files=files)
+        """
+        if current_folder["id"] is None:
+            files = conn.execute(
+                base_query + " WHERE files.folder_id IS NULL ORDER BY files.uploaded_at DESC"
+            ).fetchall()
+        else:
+            files = conn.execute(
+                base_query + " WHERE files.folder_id = ? ORDER BY files.uploaded_at DESC",
+                (current_folder["id"],),
+            ).fetchall()
+
+    return render_template(
+        "dashboard/files.html",
+        files=files,
+        subfolders=subfolders,
+        current_folder=current_folder,
+        breadcrumbs=breadcrumbs,
+    )
 
 
 @app.route("/upload", methods=["POST"])
 @login_required
 def upload_file():
+    folder_id_raw = request.form.get("folder_id", "").strip()
+    redirect_kwargs: Dict[str, Any] = {}
+    if folder_id_raw and folder_id_raw.isdigit():
+        redirect_kwargs["folder_id"] = int(folder_id_raw)
+
     uploaded_file = request.files.get("file")
     if not uploaded_file or uploaded_file.filename == "":
         flash("Please select a file to upload.", "warning")
-        return redirect(url_for("file_share"))
+        return redirect(url_for("file_share", **redirect_kwargs))
 
     original_name = uploaded_file.filename
     safe_name = secure_filename(original_name)
     if not safe_name:
         flash("The selected file name is not allowed.", "danger")
-        return redirect(url_for("file_share"))
+        return redirect(url_for("file_share", **redirect_kwargs))
 
     stored_name = f"{uuid4().hex}_{safe_name}"
     file_path = UPLOAD_DIR / stored_name
-    try:
-        uploaded_file.save(os.fspath(file_path))
-    except OSError:
-        flash("There was a problem saving the uploaded file.", "danger")
-        return redirect(url_for("file_share"))
-
     with get_db_connection() as conn:
+        folder_id: Optional[int] = None
+        if folder_id_raw:
+            if folder_id_raw.isdigit():
+                candidate = conn.execute(
+                    "SELECT id FROM folders WHERE id = ?",
+                    (int(folder_id_raw),),
+                ).fetchone()
+                if candidate is None:
+                    flash("Choose a valid destination folder.", "danger")
+                    return redirect(url_for("file_share"))
+                folder_id = int(folder_id_raw)
+                redirect_kwargs["folder_id"] = folder_id
+            else:
+                flash("Choose a valid destination folder.", "danger")
+                return redirect(url_for("file_share"))
+
+        try:
+            uploaded_file.save(os.fspath(file_path))
+        except OSError:
+            flash("There was a problem saving the uploaded file.", "danger")
+            return redirect(url_for("file_share", **redirect_kwargs))
+
         conn.execute(
-            "INSERT INTO files (original_name, stored_name, uploader_id) VALUES (?, ?, ?)",
-            (original_name, stored_name, session["user_id"]),
+            """
+            INSERT INTO files (original_name, stored_name, uploader_id, folder_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (original_name, stored_name, session["user_id"], folder_id),
         )
         conn.commit()
 
     flash("File uploaded successfully.", "success")
-    return redirect(url_for("file_share"))
+    return redirect(url_for("file_share", **redirect_kwargs))
+
+
+@app.route("/folders/new", methods=["POST"])
+@login_required
+def create_folder():
+    name = request.form.get("name", "").strip()
+    parent_id_raw = request.form.get("parent_id", "").strip()
+
+    redirect_kwargs: Dict[str, Any] = {}
+    if parent_id_raw and parent_id_raw.isdigit():
+        redirect_kwargs["folder_id"] = int(parent_id_raw)
+
+    if not name:
+        flash("Name your new folder to organize the shared drive.", "warning")
+        return redirect(url_for("file_share", **redirect_kwargs))
+
+    with get_db_connection() as conn:
+        parent_id: Optional[int] = None
+        if parent_id_raw:
+            if parent_id_raw.isdigit():
+                parent_row = conn.execute(
+                    "SELECT id FROM folders WHERE id = ?",
+                    (int(parent_id_raw),),
+                ).fetchone()
+                if parent_row is None:
+                    flash("That parent folder is no longer available.", "danger")
+                    return redirect(url_for("file_share"))
+                parent_id = int(parent_id_raw)
+            else:
+                flash("Choose a valid parent folder.", "danger")
+                return redirect(url_for("file_share"))
+
+        conflict = conn.execute(
+            """
+            SELECT 1
+            FROM folders
+            WHERE name = :name AND (
+                (:parent_id IS NULL AND parent_id IS NULL) OR parent_id = :parent_id
+            )
+            LIMIT 1
+            """,
+            {"parent_id": parent_id, "name": name},
+        ).fetchone()
+        if conflict:
+            flash("A folder with that name already exists here.", "warning")
+            return redirect(url_for("file_share", **redirect_kwargs))
+
+        conn.execute(
+            "INSERT INTO folders (name, parent_id, created_by) VALUES (?, ?, ?)",
+            (name, parent_id, session.get("user_id")),
+        )
+        conn.commit()
+
+    flash("Folder created.", "success")
+    return redirect(url_for("file_share", **redirect_kwargs))
+
+
+@app.route("/folders/<int:folder_id>/delete", methods=["POST"])
+@admin_required
+def delete_folder(folder_id: int):
+    with get_db_connection() as conn:
+        folder = conn.execute(
+            "SELECT id, name, parent_id FROM folders WHERE id = ?",
+            (folder_id,),
+        ).fetchone()
+        if folder is None:
+            flash("That folder could not be found.", "danger")
+            return redirect(url_for("file_share"))
+
+        child_count = conn.execute(
+            "SELECT COUNT(*) FROM folders WHERE parent_id = ?",
+            (folder_id,),
+        ).fetchone()[0]
+        file_count = conn.execute(
+            "SELECT COUNT(*) FROM files WHERE folder_id = ?",
+            (folder_id,),
+        ).fetchone()[0]
+        if child_count or file_count:
+            flash("Empty the folder before deleting it.", "warning")
+            redirect_kwargs = {"folder_id": folder["id"]}
+            return redirect(url_for("file_share", **redirect_kwargs))
+
+        conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+        conn.commit()
+
+        parent_id = folder["parent_id"]
+
+    flash("Folder removed.", "info")
+    redirect_kwargs = {}
+    if parent_id is not None:
+        redirect_kwargs["folder_id"] = parent_id
+    return redirect(url_for("file_share", **redirect_kwargs))
 
 
 @app.route("/download/<int:file_id>")
