@@ -1,97 +1,73 @@
 {% extends 'layouts/base.html' %}
 {% block content %}
-  {% if trello_board_embed_url %}
-    <div class="card bg-dark border border-warning-subtle mb-4">
-      <div class="card-body d-flex flex-column gap-3">
-        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
-          <div>
-            <h1 class="h4 brand-accent mb-2">Shared Trello Board</h1>
-            <p class="text-secondary mb-0">Collaborate live on the 3 Strands operations board without leaving the dashboard.</p>
-          </div>
-          <a class="btn btn-outline-straw" href="{{ trello_board_url or url_for('tasks_board') }}" target="_blank" rel="noopener">Open in Trello</a>
-        </div>
-        <div class="ratio ratio-16x9 trello-embed-frame">
-          <iframe src="{{ trello_board_embed_url }}" style="border:0" loading="lazy" title="3 Strands Trello board"></iframe>
-        </div>
-      </div>
-    </div>
-  {% endif %}
-
   <div class="row g-4 mb-4">
-    <div class="col-xl-5">
+    <div class="col-xl-6">
       <div class="card h-100">
         <div class="card-body d-flex flex-column gap-3">
           <div>
             <h1 class="h4 brand-accent mb-2">Shared Task Board</h1>
-            <p class="text-secondary mb-0">Coordinate livestock care, deliveries, farmers market prep, and cooler upkeep so every cut reaches the table with excellence.</p>
+            <p class="text-secondary mb-0">Coordinate processing runs, farmers market prep, and cooler upkeep so every order stays on track.</p>
           </div>
-          {% if trello_embed_only %}
-            <div class="alert alert-warning bg-dark border-warning text-warning mb-0" role="alert">
-              Manage cards directly on the Trello board above. Add the Trello API key and token in <code>instance/config.py</code> to edit cards from the dashboard.
+          <form method="post" action="{{ url_for('create_task') }}" class="d-grid gap-3">
+            <div>
+              <label for="title" class="form-label">Task title</label>
+              <input type="text" class="form-control" id="title" name="title" placeholder="Schedule beef processing pickup" required>
             </div>
-          {% else %}
-            {% if trello_enabled %}
-              <div class="alert alert-warning bg-dark border-warning text-warning mb-0" role="alert">
-                Live with Trello &mdash; cards, lists, and updates sync instantly with the shared board.
-              </div>
-            {% endif %}
-            <form method="post" action="{{ url_for('create_task') }}" class="d-grid gap-3">
-              <div>
-                <label for="title" class="form-label">Task title</label>
-                <input type="text" class="form-control" id="title" name="title" placeholder="Schedule beef processing pickup" required>
-              </div>
-              <div>
-                <label for="description" class="form-label">Details</label>
-                <textarea class="form-control" id="description" name="description" rows="3" placeholder="Include cut sheet deadlines, processor contacts, or market notes."></textarea>
-              </div>
-              <div>
-                <label for="list_id" class="form-label">Start in list</label>
-                <select class="form-select" id="list_id" name="list_id">
-                  {% for task_list in task_lists %}
-                    <option value="{{ task_list['id'] }}">{{ task_list['name'] }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <button type="submit" class="btn btn-brand">Add to Board</button>
-            </form>
-            <div class="small text-secondary">
-              Tip: Everyone can move tasks between lists as work progresses. Use the details field to track delivery stops, feed schedules, or cooler maintenance notes.
+            <div>
+              <label for="description" class="form-label">Details</label>
+              <textarea class="form-control" id="description" name="description" rows="3" placeholder="Include delivery stops, feed schedules, or marketing notes."></textarea>
             </div>
-            <form method="post" action="{{ url_for('create_task_list') }}" class="d-grid gap-2 mt-4">
-              <div>
-                <label for="list-name" class="form-label">Add a new list</label>
-                <input type="text" class="form-control" id="list-name" name="name" placeholder="Add 'Butcher Prep' or 'Farmers Market'" required>
-              </div>
-              <button type="submit" class="btn btn-outline-straw">{{ 'Add Trello List' if trello_enabled else 'Create List' }}</button>
-            </form>
-          {% endif %}
+            <div>
+              <label for="list_id" class="form-label">Start in list</label>
+              <select class="form-select" id="list_id" name="list_id">
+                {% for task_list in task_lists %}
+                  <option value="{{ task_list['id'] }}">{{ task_list['name'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label for="assigned_to" class="form-label">Assign to</label>
+              <select class="form-select" id="assigned_to" name="assigned_to">
+                <option value="">Unassigned</option>
+                {% for member in assignable_users %}
+                  <option value="{{ member['id'] }}">{{ member['display_name'] }}</option>
+                {% endfor %}
+              </select>
+              {% if not assignable_users %}
+                <div class="form-text text-secondary">Invite team members from the Admin area to assign tasks.</div>
+              {% endif %}
+            </div>
+            <button type="submit" class="btn btn-brand">Add to Board</button>
+          </form>
+          <div class="small text-secondary">
+            Tip: Everyone can move tasks between lists as work progresses. Use the assignment picker so crew members know what is expected.
+          </div>
+          <form method="post" action="{{ url_for('create_task_list') }}" class="d-grid gap-2 mt-4">
+            <div>
+              <label for="list-name" class="form-label">Add a new list</label>
+              <input type="text" class="form-control" id="list-name" name="name" placeholder="Add 'Butcher Prep' or 'Farmers Market'" required>
+            </div>
+            <button type="submit" class="btn btn-outline-straw">Create List</button>
+          </form>
         </div>
       </div>
     </div>
-    <div class="col-xl-7">
+    <div class="col-xl-6">
       <div class="card h-100 cooler-placeholder">
         <div class="card-body d-flex flex-column gap-3">
-          <h2 class="h5 brand-accent mb-1">File Share &amp; Cooler Logs</h2>
-          <p class="text-secondary mb-0">Need a spec sheet or compliance checklist while planning tasks? Hop over to the shared drive or keep an eye on the cooler log placeholder until sensors come online.</p>
-          <div class="d-flex flex-wrap gap-2">
-            <a class="btn btn-outline-straw" href="{{ url_for('file_share') }}">Go to File Share</a>
-            <a class="btn btn-outline-straw" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
-          </div>
+          <h2 class="h5 brand-accent mb-1">Board Quick Reference</h2>
+          <p class="text-secondary mb-0">Use the lists below to visualize workflow from chute to delivery. Drag cards between stages after stand-up or during market prep.</p>
           <ul class="small text-secondary mb-0 ps-3">
-            <li>Upcoming: live cooler temperature tiles right beside this board.</li>
-            <li>Use tasks to assign morning feedings or delivery runs.</li>
-            <li>Drop links to recipes or marketing collateral from the file share.</li>
+            <li>Assign each task to a hands-on teammate so responsibilities are clear.</li>
+            <li>Drop delivery routes, vet contacts, or ministry follow-up notes in the details field.</li>
+            <li>Need crew members? Create them from the Admin tools and they will appear here automatically.</li>
           </ul>
         </div>
       </div>
     </div>
   </div>
 
-  {% if trello_embed_only %}
-    <div class="alert alert-info bg-dark border-warning text-warning" role="alert">
-      The Trello board above is the live source of truth. Make updates there to keep the crew aligned in real time.
-    </div>
-  {% else %}
+  {% if task_lists %}
     <div class="row g-4 task-board-row">
       {% for task_list in task_lists %}
         <div class="col-lg-4">
@@ -111,9 +87,8 @@
                   <button class="btn btn-outline-warning" type="submit">Save</button>
                 </div>
               </form>
-              {% set confirm_message = 'Archive this Trello list?' if trello_enabled else 'Remove this list? Tasks must be moved first.' %}
-              <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('{{ confirm_message }}');">
-                <button class="btn btn-sm btn-outline-danger w-100" type="submit">{{ 'Archive list' if trello_enabled else 'Delete list' }}</button>
+              <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('Remove this list? Tasks must be moved first.');">
+                <button class="btn btn-sm btn-outline-danger w-100" type="submit">Delete list</button>
               </form>
             </div>
             <div class="d-grid gap-3">
@@ -131,6 +106,13 @@
                       <div class="d-flex flex-wrap justify-content-between align-items-center small text-secondary gap-2">
                         <span>Logged by {{ task['creator'] or 'team member' }}</span>
                         <span>{{ task['created_at'] or '' }}</span>
+                      </div>
+                      <div class="small text-secondary fw-semibold">
+                        {% if task['assignee'] %}
+                          Assigned to {{ task['assignee'] }}
+                        {% else %}
+                          Unassigned
+                        {% endif %}
                       </div>
                       <div class="d-flex flex-wrap gap-2">
                         {% for option in task_lists %}
@@ -156,6 +138,15 @@
                             <label class="form-label small" for="description-{{ task['id'] }}">Details</label>
                             <textarea class="form-control form-control-sm" id="description-{{ task['id'] }}" name="description" rows="3">{{ task['description'] or '' }}</textarea>
                           </div>
+                          <div>
+                            <label class="form-label small" for="assigned-to-{{ task['id'] }}">Assign to</label>
+                            <select class="form-select form-select-sm" id="assigned-to-{{ task['id'] }}" name="assigned_to">
+                              <option value="" {% if not task['assigned_to'] %}selected{% endif %}>Unassigned</option>
+                              {% for member in assignable_users %}
+                                <option value="{{ member['id'] }}" {% if task['assigned_to'] == member['id'] %}selected{% endif %}>{{ member['display_name'] }}</option>
+                              {% endfor %}
+                            </select>
+                          </div>
                           <div class="text-end">
                             <button class="btn btn-sm btn-brand" type="submit">Save changes</button>
                           </div>
@@ -173,6 +164,10 @@
           </div>
         </div>
       {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info bg-dark border-warning text-warning" role="alert">
+      Create your first list to start planning the next processing day.
     </div>
   {% endif %}
 {% endblock %}
