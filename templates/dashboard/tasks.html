@@ -19,10 +19,14 @@
             </div>
             <div>
               <label for="list_id" class="form-label">Start in list</label>
-              <select class="form-select" id="list_id" name="list_id">
-                {% for task_list in task_lists %}
-                  <option value="{{ task_list['id'] }}">{{ task_list['name'] }}</option>
-                {% endfor %}
+              <select class="form-select" id="list_id" name="list_id" {% if not active_task_lists %}disabled{% endif %}>
+                {% if active_task_lists %}
+                  {% for task_list in active_task_lists %}
+                    <option value="{{ task_list['id'] }}">{{ task_list['name'] }}</option>
+                  {% endfor %}
+                {% else %}
+                  <option value="">Create a list to start assigning work</option>
+                {% endif %}
               </select>
             </div>
             <div>
@@ -37,8 +41,11 @@
                 <div class="form-text text-secondary">Invite team members from the Admin area to assign tasks.</div>
               {% endif %}
             </div>
-            <button type="submit" class="btn btn-brand">Add to Board</button>
+            <button type="submit" class="btn btn-brand" {% if not active_task_lists %}disabled{% endif %}>Add to Board</button>
           </form>
+          {% if not active_task_lists %}
+            <div class="small text-warning">Add an active list below to start logging new tasks. Completed items archive automatically.</div>
+          {% endif %}
           <div class="small text-secondary">
             Tip: Check tasks off when the work is wrapped — they will slide into your Completed list automatically. Use the assignment picker so crew members know what is expected.
           </div>
@@ -67,30 +74,39 @@
     </div>
   </div>
 
-  {% if task_lists %}
+  {% if board_lists %}
     <div class="row g-4 task-board-row">
-      {% for task_list in task_lists %}
+      {% for task_list in board_lists %}
+        {% set is_completed = completed_list_id and task_list['id'] == completed_list_id %}
         <div class="col-lg-4">
           <div class="task-column h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">
               <h2 class="h5 mb-0 text-uppercase letter-spacing-1">{{ task_list['name'] }}</h2>
               <div class="d-flex align-items-center gap-2">
                 <span class="badge rounded-pill text-bg-warning text-dark">{{ tasks_by_list.get(task_list['id'], [])|length }}</span>
-                <button class="btn btn-sm btn-outline-straw" type="button" data-bs-toggle="collapse" data-bs-target="#list-actions-{{ task_list['id'] }}" aria-expanded="false" aria-controls="list-actions-{{ task_list['id'] }}">Manage</button>
+                {% if not is_completed %}
+                  <button class="btn btn-sm btn-outline-straw" type="button" data-bs-toggle="collapse" data-bs-target="#list-actions-{{ task_list['id'] }}" aria-expanded="false" aria-controls="list-actions-{{ task_list['id'] }}">Manage</button>
+                {% else %}
+                  <span class="badge rounded-pill text-bg-secondary">Auto-archive</span>
+                {% endif %}
               </div>
             </div>
-            <div class="collapse mb-3" id="list-actions-{{ task_list['id'] }}">
-              <form method="post" action="{{ url_for('rename_task_list', list_id=task_list['id']) }}" class="d-grid gap-2 mb-2">
-                <label class="form-label small" for="rename-{{ task_list['id'] }}">Rename list</label>
-                <div class="input-group input-group-sm">
-                  <input type="text" class="form-control" id="rename-{{ task_list['id'] }}" name="name" value="{{ task_list['name'] }}" required>
-                  <button class="btn btn-outline-warning" type="submit">Save</button>
-                </div>
-              </form>
-              <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('Remove this list? Tasks must be moved first.');">
-                <button class="btn btn-sm btn-outline-danger w-100" type="submit">Delete list</button>
-              </form>
-            </div>
+            {% if not is_completed %}
+              <div class="collapse mb-3" id="list-actions-{{ task_list['id'] }}">
+                <form method="post" action="{{ url_for('rename_task_list', list_id=task_list['id']) }}" class="d-grid gap-2 mb-2">
+                  <label class="form-label small" for="rename-{{ task_list['id'] }}">Rename list</label>
+                  <div class="input-group input-group-sm">
+                    <input type="text" class="form-control" id="rename-{{ task_list['id'] }}" name="name" value="{{ task_list['name'] }}" required>
+                    <button class="btn btn-outline-warning" type="submit">Save</button>
+                  </div>
+                </form>
+                <form method="post" action="{{ url_for('delete_task_list', list_id=task_list['id'] ) }}" onsubmit="return confirm('Remove this list? Tasks must be moved first.');">
+                  <button class="btn btn-sm btn-outline-danger w-100" type="submit">Delete list</button>
+                </form>
+              </div>
+            {% else %}
+              <div class="small text-secondary mb-3">Checked-off tasks land here and stay searchable for audits.</div>
+            {% endif %}
             <div class="d-grid gap-3">
               {% set column_tasks = tasks_by_list.get(task_list['id'], []) %}
               {% if column_tasks %}
@@ -167,7 +183,11 @@
                 {% endfor %}
               {% else %}
                 <div class="empty-column text-secondary text-center py-4 px-3">
-                  No tasks here yet. Create one above and check it off once the crew is finished.
+                  {% if is_completed %}
+                    Completed assignments will stack here after you mark them finished.
+                  {% else %}
+                    No tasks here yet. Create one above and check it off once the crew is finished.
+                  {% endif %}
                 </div>
               {% endif %}
             </div>

@@ -324,17 +324,24 @@ def init_db():
             )
         conn.commit()
 
-        default_lists = [
-            ("Chute Gate", 1),
-            ("On Deck", 2),
-            ("Ready to Deliver", 3),
-            ("Completed Runs", 4),
-        ]
-        for name, position in default_lists:
-            slug = slugify(name)
+        legacy_completed = conn.execute(
+            "SELECT id, name, slug FROM task_lists WHERE slug = ?",
+            ("completed-runs",),
+        ).fetchone()
+        if legacy_completed is not None:
             conn.execute(
-                "INSERT OR IGNORE INTO task_lists (name, slug, position) VALUES (?, ?, ?)",
-                (name, slug, position),
+                "UPDATE task_lists SET name = ?, slug = ?, position = ? WHERE id = ?",
+                ("Completed", "completed", 1000, legacy_completed["id"]),
+            )
+
+        completed_exists = conn.execute(
+            "SELECT 1 FROM task_lists WHERE slug = ?",
+            ("completed",),
+        ).fetchone()
+        if completed_exists is None:
+            conn.execute(
+                "INSERT INTO task_lists (name, slug, position) VALUES (?, ?, ?)",
+                ("Completed", "completed", 1000),
             )
         conn.commit()
 
@@ -964,7 +971,28 @@ def tasks_board():
             ORDER BY display_name COLLATE NOCASE, id
             """
         ).fetchall()
-    tasks_by_list: Dict[int, list] = {task_list["id"]: [] for task_list in task_lists}
+    lists_by_id = {task_list["id"]: task_list for task_list in task_lists}
+    completed_list = next(
+        (lst for lst in task_lists if _is_completed_list(lst["slug"], lst["name"])),
+        None,
+    )
+    active_lists = [
+        lst for lst in task_lists if not _is_completed_list(lst["slug"], lst["name"])
+    ]
+    board_lists = list(active_lists)
+    if completed_list is not None:
+        board_lists.append(completed_list)
+
+    seen_ids = {lst["id"] for lst in board_lists}
+    for task in tasks:
+        list_id = task["list_id"]
+        if list_id is not None and list_id not in seen_ids:
+            extra_list = lists_by_id.get(list_id)
+            if extra_list is not None:
+                board_lists.append(extra_list)
+                seen_ids.add(extra_list["id"])
+
+    tasks_by_list: Dict[int, list] = {task_list["id"]: [] for task_list in board_lists}
     for task in tasks:
         tasks_by_list.setdefault(task["list_id"], []).append(task)
     completed_list = next(
@@ -973,7 +1001,8 @@ def tasks_board():
     )
     return render_template(
         "dashboard/tasks.html",
-        task_lists=task_lists,
+        board_lists=board_lists,
+        active_task_lists=active_lists,
         tasks_by_list=tasks_by_list,
         assignable_users=assignable_users,
         completed_list_id=completed_list["id"] if completed_list else None,
@@ -999,11 +1028,15 @@ def create_task():
     assigned_to_id: Optional[int] = None
     with get_db_connection() as conn:
         task_list = conn.execute(
-            "SELECT id, slug FROM task_lists WHERE id = ?",
+            "SELECT id, slug, name FROM task_lists WHERE id = ?",
             (list_id,),
         ).fetchone()
         if task_list is None:
             flash("That task list no longer exists.", "danger")
+            return redirect(url_for("tasks_board"))
+
+        if _is_completed_list(task_list["slug"], task_list["name"]):
+            flash("Create or select an active list to add new tasks. Completed is archive-only.", "warning")
             return redirect(url_for("tasks_board"))
 
         if assigned_to_raw:
@@ -1284,11 +1317,14 @@ def rename_task_list(list_id: str):
     list_id_int = int(list_id)
     with get_db_connection() as conn:
         current = conn.execute(
-            "SELECT slug FROM task_lists WHERE id = ?",
+            "SELECT slug, name FROM task_lists WHERE id = ?",
             (list_id_int,),
         ).fetchone()
         if current is None:
             flash("That list could not be found.", "danger")
+            return redirect(url_for("tasks_board"))
+        if _is_completed_list(current["slug"], current["name"]):
+            flash("The Completed archive cannot be renamed.", "warning")
             return redirect(url_for("tasks_board"))
         base_slug = slugify(name)
         slug = current["slug"] if current["slug"] == base_slug else _ensure_unique_list_slug(conn, base_slug)
@@ -1321,11 +1357,14 @@ def delete_task_list(list_id: str):
             return redirect(url_for("tasks_board"))
 
         existing = conn.execute(
-            "SELECT id FROM task_lists WHERE id = ?",
+            "SELECT id, slug, name FROM task_lists WHERE id = ?",
             (list_id_int,),
         ).fetchone()
         if existing is None:
             flash("That list could not be found.", "danger")
+            return redirect(url_for("tasks_board"))
+        if _is_completed_list(existing["slug"], existing["name"]):
+            flash("The Completed archive cannot be removed.", "warning")
             return redirect(url_for("tasks_board"))
 
         has_tasks = conn.execute(
