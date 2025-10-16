@@ -264,11 +264,13 @@ def init_db():
                 position INTEGER NOT NULL DEFAULT 0,
                 created_by INTEGER,
                 assigned_to INTEGER,
+                previous_list_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 list_id INTEGER,
                 FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
-                FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE SET NULL
+                FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE SET NULL,
+                FOREIGN KEY (previous_list_id) REFERENCES task_lists(id) ON DELETE SET NULL
             )
             """
         )
@@ -306,6 +308,8 @@ def init_db():
             conn.execute("ALTER TABLE tasks ADD COLUMN list_id INTEGER")
         if "assigned_to" not in existing_tasks_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN assigned_to INTEGER")
+        if "previous_list_id" not in existing_tasks_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN previous_list_id INTEGER")
         conn.commit()
 
         existing_indexes = {
@@ -940,7 +944,9 @@ def tasks_board():
                    tasks.created_at,
                    tasks.position,
                    tasks.list_id,
+                   tasks.status,
                    tasks.assigned_to,
+                   tasks.previous_list_id,
                    COALESCE(NULLIF(creator.full_name, ''), creator.username) AS creator,
                    COALESCE(NULLIF(assignee.full_name, ''), assignee.username) AS assignee
             FROM tasks
@@ -961,11 +967,16 @@ def tasks_board():
     tasks_by_list: Dict[int, list] = {task_list["id"]: [] for task_list in task_lists}
     for task in tasks:
         tasks_by_list.setdefault(task["list_id"], []).append(task)
+    completed_list = next(
+        (lst for lst in task_lists if _is_completed_list(lst["slug"], lst["name"])),
+        None,
+    )
     return render_template(
         "dashboard/tasks.html",
         task_lists=task_lists,
         tasks_by_list=tasks_by_list,
         assignable_users=assignable_users,
+        completed_list_id=completed_list["id"] if completed_list else None,
     )
 
 
@@ -1034,6 +1045,113 @@ def create_task():
     return redirect(url_for("tasks_board"))
 
 
+@app.route("/tasks/<task_id>/toggle", methods=["POST"])
+@login_required
+def toggle_task_completion(task_id: str):
+    completed_raw = request.form.get("completed", "0").strip()
+    current_list_raw = request.form.get("current_list_id", "").strip()
+
+    if not task_id.isdigit():
+        flash("Task could not be found.", "danger")
+        return redirect(url_for("tasks_board"))
+    if not current_list_raw.isdigit():
+        flash("That task list is not available.", "danger")
+        return redirect(url_for("tasks_board"))
+
+    task_id_int = int(task_id)
+    current_list_id = int(current_list_raw)
+    completed_flag = completed_raw == "1"
+
+    with get_db_connection() as conn:
+        task = conn.execute(
+            "SELECT id, list_id, previous_list_id FROM tasks WHERE id = ?",
+            (task_id_int,),
+        ).fetchone()
+        if task is None:
+            flash("Task could not be found.", "danger")
+            return redirect(url_for("tasks_board"))
+
+        task_lists = list(_fetch_task_lists(conn))
+        lists_by_id = {lst["id"]: lst for lst in task_lists}
+        completed_list = next(
+            (lst for lst in task_lists if _is_completed_list(lst["slug"], lst["name"])),
+            None,
+        )
+
+        if completed_flag:
+            if completed_list is None:
+                flash("Create a Completed list before marking tasks done.", "warning")
+                return redirect(url_for("tasks_board"))
+            previous_list_id = (
+                task["list_id"]
+                if task["list_id"] != completed_list["id"]
+                else task["previous_list_id"]
+            )
+            max_position = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE list_id = ?",
+                (completed_list["id"],),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                UPDATE tasks
+                SET list_id = ?, status = ?, position = ?, previous_list_id = ?
+                WHERE id = ?
+                """,
+                (
+                    completed_list["id"],
+                    completed_list["slug"],
+                    max_position + 1,
+                    previous_list_id,
+                    task_id_int,
+                ),
+            )
+        else:
+            if not task_lists:
+                flash("Add a task list to reopen items.", "warning")
+                return redirect(url_for("tasks_board"))
+
+            target_list_id = task["previous_list_id"]
+            if target_list_id is None or target_list_id not in lists_by_id:
+                target_list_id = next(
+                    (
+                        lst["id"]
+                        for lst in task_lists
+                        if lst["id"]
+                        != (completed_list["id"] if completed_list else None)
+                        and not _is_completed_list(lst["slug"], lst["name"])
+                    ),
+                    None,
+                )
+            target_list = lists_by_id.get(target_list_id)
+            if target_list is None:
+                target_list = lists_by_id.get(current_list_id)
+            if target_list is None:
+                flash("That task list is not available.", "danger")
+                return redirect(url_for("tasks_board"))
+
+            max_position = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) FROM tasks WHERE list_id = ?",
+                (target_list["id"],),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                UPDATE tasks
+                SET list_id = ?, status = ?, position = ?, previous_list_id = NULL
+                WHERE id = ?
+                """,
+                (
+                    target_list["id"],
+                    target_list["slug"],
+                    max_position + 1,
+                    task_id_int,
+                ),
+            )
+        conn.commit()
+
+    flash("Task updated.", "success")
+    return redirect(url_for("tasks_board"))
+
+
 @app.route("/tasks/<task_id>/move", methods=["POST"])
 @login_required
 def move_task(task_id: str):
@@ -1057,7 +1175,7 @@ def move_task(task_id: str):
             (list_id,),
         ).fetchone()[0]
         cursor = conn.execute(
-            "UPDATE tasks SET list_id = ?, status = ?, position = ? WHERE id = ?",
+            "UPDATE tasks SET list_id = ?, status = ?, position = ?, previous_list_id = NULL WHERE id = ?",
             (list_id, task_list["slug"], max_position + 1, task_id_int),
         )
         conn.commit()
