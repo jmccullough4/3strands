@@ -5,7 +5,7 @@
       <div class="card card-farm h-100">
         <div class="card-body d-flex flex-column flex-lg-row align-items-lg-center gap-4">
           <div class="flex-grow-1">
-            <h1 class="h3 brand-emerald text-uppercase mb-2">Pasture-to-Table Command Center</h1>
+            <h1 class="h3 brand-emerald text-uppercase mb-2">Command Center</h1>
             <p class="mb-3 text-secondary">Keep beef, pork, and chicken operations in step with mission-driven stewardship. Use the quick tools below to keep paperwork tight, tasks flowing, and coolers ready for the next harvest.</p>
             <div class="d-flex flex-wrap gap-3">
               <a class="btn btn-brand" href="{{ url_for('file_share') }}">Open File Share</a>
@@ -82,18 +82,33 @@
     <div class="col-lg-4">
       <div class="card h-100">
         <div class="card-body d-flex flex-column gap-3">
-          <h2 class="card-title h4 mb-2 brand-accent">Task Board Snapshot</h2>
-          <p class="text-secondary mb-0">Where ranch hands track herd health, deliveries, and on-farm prep together.</p>
-          {% if task_summary %}
+          <div>
+            <h2 class="card-title h4 mb-2 brand-accent">Trello Command Board</h2>
+            <p class="text-secondary mb-0">Stay aligned with the shared Trello workspace for every herd and delivery task.</p>
+          </div>
+          {% if trello_board_embed_url %}
+            <div class="ratio ratio-4x3 trello-embed-frame">
+              <iframe src="{{ trello_board_embed_url }}" style="border:0" loading="lazy" title="3 Strands Trello board"></iframe>
+            </div>
+            {% if task_summary %}
+              <ul class="text-secondary small mb-0 ps-3">
+                {% for column in task_summary %}
+                  <li><span class="fw-semibold text-light">{{ column.count }}</span> cards in {{ column.name }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+            <a class="btn btn-outline-straw align-self-start" href="{{ trello_board_url or url_for('tasks_board') }}" target="_blank" rel="noopener">Open Trello Board</a>
+          {% elif task_summary %}
             <ul class="text-secondary small mb-0 ps-3">
               {% for column in task_summary %}
                 <li><span class="fw-semibold text-light">{{ column.count }}</span> cards in {{ column.name }}</li>
               {% endfor %}
             </ul>
+            <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Open Shared Task Board</a>
           {% else %}
             <p class="text-secondary small mb-0">Create your first list to start planning the next processing day.</p>
+            <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Build Your Task Board</a>
           {% endif %}
-          <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Open Shared Task Board</a>
         </div>
       </div>
     </div>

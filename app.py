@@ -55,6 +55,10 @@ app.config.setdefault("CALENDAR_TIMEZONE", "America/Chicago")
 app.config.setdefault("TRELLO_API_KEY", os.getenv("TRELLO_API_KEY"))
 app.config.setdefault("TRELLO_API_TOKEN", os.getenv("TRELLO_API_TOKEN"))
 app.config.setdefault("TRELLO_BOARD_ID", os.getenv("TRELLO_BOARD_ID"))
+app.config.setdefault(
+    "TRELLO_BOARD_URL",
+    os.getenv("TRELLO_BOARD_URL", "https://trello.com/b/WLeHBhSM/3-iii"),
+)
 
 
 def slugify(value: str) -> str:
@@ -211,13 +215,67 @@ class TrelloClient:
         self._request("PUT", f"/lists/{list_id}/closed", params={"value": "true"})
 
 
+def _extract_trello_board_id(board_url: Optional[str]) -> Optional[str]:
+    if not board_url:
+        return None
+
+    parsed = urlparse(board_url)
+    if parsed.netloc != "trello.com":
+        return None
+
+    path_parts = [segment for segment in parsed.path.split("/") if segment]
+    if len(path_parts) >= 2 and path_parts[0] == "b":
+        return path_parts[1]
+
+    return None
+
+
 def get_trello_client() -> Optional[TrelloClient]:
     api_key = app.config.get("TRELLO_API_KEY")
     token = app.config.get("TRELLO_API_TOKEN")
     board_id = app.config.get("TRELLO_BOARD_ID")
+
+    if not board_id:
+        derived = _extract_trello_board_id(app.config.get("TRELLO_BOARD_URL"))
+        if derived:
+            board_id = derived
+            app.config["TRELLO_BOARD_ID"] = derived
+
     if api_key and token and board_id:
         return TrelloClient(api_key, token, board_id)
     return None
+
+
+def _format_trello_board_embed(raw_url: Optional[str]) -> Optional[str]:
+    if not raw_url:
+        return None
+
+    url = raw_url.strip()
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    if parsed.netloc == "trello.com":
+        path_parts = [segment for segment in parsed.path.split("/") if segment]
+        if len(path_parts) >= 2 and path_parts[0] == "b":
+            board_id = path_parts[1]
+            slug = path_parts[2] if len(path_parts) >= 3 else ""
+            slug_segment = f"/{slug}" if slug else ""
+            return f"https://trello.com/b/{board_id}{slug_segment}.html"
+
+    return url
+
+
+def _resolve_trello_board_links() -> Tuple[Optional[str], Optional[str]]:
+    board_url = app.config.get("TRELLO_BOARD_URL")
+    if not isinstance(board_url, str):
+        board_url = ""
+    board_url = board_url.strip()
+    if not board_url:
+        return None, None
+
+    embed_url = _format_trello_board_embed(board_url)
+    return board_url, embed_url
 
 
 def _format_calendar_url(raw_url: str, timezone: str) -> str:
@@ -536,11 +594,14 @@ def dashboard():
             }
             for task_list in task_lists
         ]
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     return render_template(
         "dashboard/index.html",
         recent_files=recent_files,
         task_summary=task_summary,
         calendar_embeds=list(_resolve_calendar_embeds()),
+        trello_board_url=trello_board_url,
+        trello_board_embed_url=trello_board_embed_url,
     )
 
 
@@ -844,6 +905,7 @@ def logout():
 @login_required
 def tasks_board():
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         try:
             task_lists, trello_tasks = trello_client.fetch_board_state()
@@ -856,6 +918,20 @@ def tasks_board():
             task_lists=task_lists,
             tasks_by_list=trello_tasks,
             trello_enabled=True,
+            trello_board_url=trello_board_url,
+            trello_board_embed_url=trello_board_embed_url,
+            trello_embed_only=False,
+        )
+
+    if trello_board_embed_url:
+        return render_template(
+            "dashboard/tasks.html",
+            task_lists=[],
+            tasks_by_list={},
+            trello_enabled=False,
+            trello_board_url=trello_board_url,
+            trello_board_embed_url=trello_board_embed_url,
+            trello_embed_only=True,
         )
 
     with get_db_connection() as conn:
@@ -882,6 +958,9 @@ def tasks_board():
         task_lists=task_lists,
         tasks_by_list=tasks_by_list,
         trello_enabled=False,
+        trello_board_url=trello_board_url,
+        trello_board_embed_url=trello_board_embed_url,
+        trello_embed_only=False,
     )
 
 
@@ -896,6 +975,7 @@ def create_task():
         flash("Task title is required.", "warning")
         return redirect(url_for("tasks_board"))
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         if not list_id_raw:
             flash("Select a list on the Trello board.", "danger")
@@ -906,6 +986,13 @@ def create_task():
             flash(str(exc), "danger")
         else:
             flash("Task added to the shared Trello board.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Add cards directly in Trello or configure the API credentials to manage them here.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     if not list_id_raw.isdigit():
@@ -951,6 +1038,7 @@ def create_task():
 def move_task(task_id: str):
     list_id_raw = request.form.get("list_id", "").strip()
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         if not list_id_raw:
             flash("That Trello list is not available.", "danger")
@@ -961,6 +1049,13 @@ def move_task(task_id: str):
             flash(str(exc), "danger")
         else:
             flash("Task updated.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Move cards directly in Trello or add API credentials to sync from the dashboard.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     if not list_id_raw.isdigit() or not task_id.isdigit():
@@ -1005,6 +1100,7 @@ def update_task(task_id: str):
         return redirect(url_for("tasks_board"))
 
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         try:
             trello_client.update_card(
@@ -1018,8 +1114,11 @@ def update_task(task_id: str):
             flash("Task details saved.", "success")
         return redirect(url_for("tasks_board"))
 
-    if not task_id.isdigit():
-        flash("Task could not be found.", "danger")
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Edit cards directly in Trello or configure the API credentials to manage them here.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     with get_db_connection() as conn:
@@ -1040,6 +1139,7 @@ def update_task(task_id: str):
 @login_required
 def delete_task(task_id: str):
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         try:
             trello_client.delete_card(task_id)
@@ -1047,6 +1147,13 @@ def delete_task(task_id: str):
             flash(str(exc), "danger")
         else:
             flash("Task removed from the board.", "info")
+        return redirect(url_for("tasks_board"))
+
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Remove cards directly in Trello or configure the API credentials to manage them here.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     if not task_id.isdigit():
@@ -1073,6 +1180,7 @@ def create_task_list():
         return redirect(url_for("tasks_board"))
 
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         try:
             trello_client.create_list(name)
@@ -1080,6 +1188,13 @@ def create_task_list():
             flash(str(exc), "danger")
         else:
             flash("New Trello list added to the board.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Create lists directly in Trello or configure the API credentials to manage them here.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     with get_db_connection() as conn:
@@ -1107,6 +1222,7 @@ def rename_task_list(list_id: str):
         return redirect(url_for("tasks_board"))
 
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         try:
             trello_client.rename_list(list_id, name)
@@ -1114,6 +1230,13 @@ def rename_task_list(list_id: str):
             flash(str(exc), "danger")
         else:
             flash("List updated.", "success")
+        return redirect(url_for("tasks_board"))
+
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Rename lists directly in Trello or configure the API credentials to manage them here.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     if not list_id.isdigit():
@@ -1149,6 +1272,7 @@ def rename_task_list(list_id: str):
 @login_required
 def delete_task_list(list_id: str):
     trello_client = get_trello_client()
+    trello_board_url, trello_board_embed_url = _resolve_trello_board_links()
     if trello_client:
         try:
             trello_client.archive_list(list_id)
@@ -1156,6 +1280,13 @@ def delete_task_list(list_id: str):
             flash(str(exc), "danger")
         else:
             flash("List archived on Trello.", "info")
+        return redirect(url_for("tasks_board"))
+
+    if trello_board_embed_url:
+        flash(
+            "The Trello board is active. Archive lists directly in Trello or configure the API credentials to manage them here.",
+            "warning",
+        )
         return redirect(url_for("tasks_board"))
 
     if not list_id.isdigit():
