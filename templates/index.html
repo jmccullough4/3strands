@@ -119,32 +119,19 @@
       <div class="card h-100">
         <div class="card-body d-flex flex-column gap-3">
           <div>
-            <h2 class="card-title h4 mb-2 brand-accent">Trello Command Board</h2>
-            <p class="text-secondary mb-0">Stay aligned with the shared Trello workspace for every herd and delivery task.</p>
+            <h2 class="card-title h4 mb-2 brand-accent">Operations Task Board</h2>
+            <p class="text-secondary mb-0">Stay aligned on herd care, deliveries, and ministry outreach with a quick glance at every list.</p>
           </div>
-          {% if trello_board_embed_url %}
-            <div class="ratio ratio-4x3 trello-embed-frame">
-              <iframe src="{{ trello_board_embed_url }}" style="border:0" loading="lazy" title="3 Strands Trello board"></iframe>
-            </div>
-            {% if task_summary %}
-              <ul class="text-secondary small mb-0 ps-3">
-                {% for column in task_summary %}
-                  <li><span class="fw-semibold text-light">{{ column.count }}</span> cards in {{ column.name }}</li>
-                {% endfor %}
-              </ul>
-            {% endif %}
-            <a class="btn btn-outline-straw align-self-start" href="{{ trello_board_url or url_for('tasks_board') }}" target="_blank" rel="noopener">Open Trello Board</a>
-          {% elif task_summary %}
+          {% if task_summary %}
             <ul class="text-secondary small mb-0 ps-3">
               {% for column in task_summary %}
-                <li><span class="fw-semibold text-light">{{ column.count }}</span> cards in {{ column.name }}</li>
+                <li><span class="fw-semibold text-light">{{ column.count }}</span> tasks in {{ column.name }}</li>
               {% endfor %}
             </ul>
-            <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Open Shared Task Board</a>
           {% else %}
             <p class="text-secondary small mb-0">Create your first list to start planning the next processing day.</p>
-            <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Build Your Task Board</a>
           {% endif %}
+          <a class="btn btn-outline-straw align-self-start" href="{{ url_for('tasks_board') }}">Open Shared Task Board</a>
         </div>
       </div>
     </div>

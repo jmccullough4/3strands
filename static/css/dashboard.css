@@ -194,19 +194,6 @@ a:hover {
   box-shadow: inset 0 0 0 1px rgba(15, 25, 33, 0.6);
 }
 
-.trello-embed-frame {
-  border-radius: 1rem;
-  overflow: hidden;
-  border: 1px solid rgba(245, 217, 125, 0.25);
-  box-shadow: inset 0 0 0 1px rgba(15, 25, 33, 0.55);
-  background: rgba(12, 20, 28, 0.65);
-}
-
-.trello-embed-frame iframe {
-  width: 100%;
-  height: 100%;
-}
-
 @media (max-width: 991.98px) {
   .nav-grid {
     grid-template-columns: 1fr;
